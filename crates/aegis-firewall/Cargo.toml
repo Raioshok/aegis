@@ -1,0 +1,14 @@
+[package]
+name = "aegis-firewall"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Aegis nftables firewall manager and connection inspector"
+
+[dependencies]
+aegis-core.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+ipnetwork = { version = "0.21", features = ["serde"] }

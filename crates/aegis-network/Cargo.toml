@@ -1,0 +1,15 @@
+[package]
+name = "aegis-network"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Aegis network intrusion detection (connection & DNS analysis, threat intel)"
+
+[dependencies]
+aegis-core.workspace = true
+aegis-firewall.workspace = true
+aegis-engine.workspace = true
+serde.workspace = true
+tracing.workspace = true
+ipnetwork = "0.21"

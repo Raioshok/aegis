@@ -8,6 +8,7 @@ mod behavior_cmds;
 mod commands;
 mod context;
 mod daemon_cmds;
+mod net_cmds;
 mod render;
 
 use clap::{Parser, Subcommand};
@@ -98,6 +99,48 @@ enum Command {
         #[arg(last = true, required = true)]
         command: Vec<String>,
     },
+    /// Manage the Aegis nftables firewall.
+    Firewall {
+        #[command(subcommand)]
+        action: FirewallCmd,
+    },
+    /// Scan live network connections for C2 / backdoor / Tor indicators.
+    Network,
+    /// Manage signed plugins.
+    Plugins {
+        #[command(subcommand)]
+        action: PluginsCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum FirewallCmd {
+    /// List live network connections.
+    Connections,
+    /// Block an IP or CIDR.
+    Block {
+        ip: String,
+        #[arg(long)]
+        comment: Option<String>,
+    },
+    /// Remove a block for an IP or CIDR.
+    Unblock { ip: String },
+    /// Show the Aegis rules (and live kernel table).
+    List,
+    /// Re-apply the saved ruleset to the kernel (needs root).
+    Apply,
+    /// Remove the Aegis nftables table (needs root).
+    Flush,
+}
+
+#[derive(Subcommand)]
+enum PluginsCmd {
+    /// List installed plugins and their trust status.
+    List,
+    /// Verify a plugin directory's signature.
+    Verify { dir: PathBuf },
+    /// Generate a new plugin signing key pair.
+    Keygen,
 }
 
 #[derive(Subcommand)]
@@ -171,6 +214,20 @@ fn run(cli: &Cli) -> aegis_core::Result<i32> {
         Command::Stop => Ok(daemon_cmds::stop()),
         Command::Rootkit => Ok(behavior_cmds::rootkit(cli.json)),
         Command::Memory { pid } => Ok(behavior_cmds::memory(*pid, cli.json)),
+        Command::Firewall { action } => Ok(match action {
+            FirewallCmd::Connections => net_cmds::firewall_connections(),
+            FirewallCmd::Block { ip, comment } => net_cmds::firewall_block(ip, comment.clone()),
+            FirewallCmd::Unblock { ip } => net_cmds::firewall_unblock(ip),
+            FirewallCmd::List => net_cmds::firewall_list(),
+            FirewallCmd::Apply => net_cmds::firewall_apply(),
+            FirewallCmd::Flush => net_cmds::firewall_flush(),
+        }),
+        Command::Network => Ok(net_cmds::network_scan(cli.json)),
+        Command::Plugins { action } => Ok(match action {
+            PluginsCmd::List => net_cmds::plugins_list(),
+            PluginsCmd::Verify { dir } => net_cmds::plugins_verify(dir),
+            PluginsCmd::Keygen => net_cmds::plugins_keygen(),
+        }),
         Command::Sandbox {
             allow_read,
             allow_write,

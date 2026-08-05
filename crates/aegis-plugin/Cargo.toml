@@ -1,0 +1,20 @@
+[package]
+name = "aegis-plugin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Aegis signed plugin SDK: manifests, ed25519 signatures, permissions, registry"
+
+[dependencies]
+aegis-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+ed25519-dalek = "2"
+rand.workspace = true
+hex = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
