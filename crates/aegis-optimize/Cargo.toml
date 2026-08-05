@@ -1,0 +1,13 @@
+[package]
+name = "aegis-optimize"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Aegis system & network optimization for Arch Linux (Kaspersky-style tune-up)"
+
+[dependencies]
+aegis-core.workspace = true
+aegis-firewall.workspace = true
+serde.workspace = true
+tracing.workspace = true

@@ -53,6 +53,7 @@ dependencies = [
  "aegis-firewall",
  "aegis-ipc",
  "aegis-network",
+ "aegis-optimize",
  "aegis-plugin",
  "aegis-quarantine",
  "aegis-storage",
@@ -153,6 +154,16 @@ dependencies = [
  "aegis-engine",
  "aegis-firewall",
  "ipnetwork",
+ "serde",
+ "tracing",
+]
+
+[[package]]
+name = "aegis-optimize"
+version = "0.1.0"
+dependencies = [
+ "aegis-core",
+ "aegis-firewall",
  "serde",
  "tracing",
 ]

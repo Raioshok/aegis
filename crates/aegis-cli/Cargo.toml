@@ -23,6 +23,7 @@ aegis-behavior.workspace = true
 aegis-firewall.workspace = true
 aegis-network.workspace = true
 aegis-plugin.workspace = true
+aegis-optimize.workspace = true
 aegis-ipc.workspace = true
 aegis-daemon.workspace = true
 clap.workspace = true

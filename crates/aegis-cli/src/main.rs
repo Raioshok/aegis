@@ -9,6 +9,7 @@ mod commands;
 mod context;
 mod daemon_cmds;
 mod net_cmds;
+mod optimize_cmds;
 mod render;
 
 use clap::{Parser, Subcommand};
@@ -115,6 +116,39 @@ enum Command {
     Plugins {
         #[command(subcommand)]
         action: PluginsCmd,
+    },
+    /// System & network optimization (Arch tune-up).
+    Optimize {
+        #[command(subcommand)]
+        action: Option<OptimizeCmd>,
+    },
+}
+
+#[derive(Subcommand)]
+enum OptimizeCmd {
+    /// Full read-only scan (default).
+    Scan,
+    /// Network-only tune-up scan.
+    Network,
+    /// Reclaim disk space (dry-run unless --apply).
+    Clean {
+        /// Actually perform the cleanup (privileged steps need sudo).
+        #[arg(long)]
+        apply: bool,
+        #[arg(long)]
+        pacman: bool,
+        #[arg(long)]
+        journal: bool,
+        #[arg(long)]
+        orphans: bool,
+        /// Include clearing ~/.cache (close apps first).
+        #[arg(long)]
+        user_cache: bool,
+    },
+    /// Apply the recommended network sysctl profile (dry-run unless --apply).
+    Tune {
+        #[arg(long)]
+        apply: bool,
     },
 }
 
@@ -247,6 +281,18 @@ fn run(cli: &Cli) -> aegis_core::Result<i32> {
             PluginsCmd::Keygen => net_cmds::plugins_keygen(),
             PluginsCmd::Sign { dir, key } => net_cmds::plugins_sign(dir, key),
             PluginsCmd::Run { dir, target } => net_cmds::plugins_run(dir, target.clone()),
+        }),
+        Command::Optimize { action } => Ok(match action {
+            None | Some(OptimizeCmd::Scan) => optimize_cmds::scan(cli.json),
+            Some(OptimizeCmd::Network) => optimize_cmds::network(cli.json),
+            Some(OptimizeCmd::Clean {
+                apply,
+                pacman,
+                journal,
+                orphans,
+                user_cache,
+            }) => optimize_cmds::clean(*apply, *pacman, *journal, *orphans, *user_cache),
+            Some(OptimizeCmd::Tune { apply }) => optimize_cmds::tune(*apply),
         }),
         Command::Sandbox {
             allow_read,
