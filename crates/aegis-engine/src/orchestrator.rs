@@ -23,7 +23,7 @@ use std::time::Instant;
 pub struct Scanner {
     config: Config,
     whitelist: Whitelist,
-    engines: Vec<Box<dyn Engine>>,
+    engines: Arc<Vec<Box<dyn Engine>>>,
     bus: EventBus,
 }
 
@@ -32,6 +32,18 @@ impl Scanner {
         config: Config,
         whitelist: Whitelist,
         engines: Vec<Box<dyn Engine>>,
+        bus: EventBus,
+    ) -> Self {
+        Self::new_shared(config, whitelist, Arc::new(engines), bus)
+    }
+
+    /// Construct a scanner over a pre-built, shareable engine set. The daemon
+    /// builds the (expensive-to-compile) YARA engine once and hands the same
+    /// `Arc` to every scan, avoiding recompilation per request.
+    pub fn new_shared(
+        config: Config,
+        whitelist: Whitelist,
+        engines: Arc<Vec<Box<dyn Engine>>>,
         bus: EventBus,
     ) -> Self {
         Self {
@@ -43,7 +55,7 @@ impl Scanner {
     }
 
     pub fn engines(&self) -> &[Box<dyn Engine>] {
-        &self.engines
+        self.engines.as_slice()
     }
 
     /// Enumerate the regular files under `target` honouring exclusions,
@@ -144,7 +156,7 @@ impl Scanner {
             sha256: &verdict.sha256,
         };
         let mut detections: Vec<Detection> = Vec::new();
-        for engine in &self.engines {
+        for engine in self.engines.iter() {
             detections.extend(engine.scan(&ctx));
         }
         verdict.detections = detections;
@@ -199,7 +211,7 @@ impl Scanner {
             threats,
             errors: errors.load(Ordering::Relaxed),
             bytes_scanned: bytes.load(Ordering::Relaxed),
-            duration_ms: start.elapsed().as_millis(),
+            duration_ms: start.elapsed().as_millis() as u64,
         };
         self.bus.publish(&Event::ScanFinished(stats.clone()));
         (stats, verdicts)

@@ -5,6 +5,8 @@ members = [
     "crates/aegis-engine",
     "crates/aegis-storage",
     "crates/aegis-quarantine",
+    "crates/aegis-ipc",
+    "crates/aegis-daemon",
     "crates/aegis-cli",
 ]
 
@@ -50,11 +52,18 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 # cli & time
 clap = { version = "4", features = ["derive"] }
 time = { version = "0.3", features = ["formatting", "macros"] }
+# async runtime & real-time (daemon)
+tokio = { version = "1", features = ["full"] }
+inotify = "0.11"
+nix = { version = "0.31", features = ["fanotify", "fs"] }
+sd-notify = "0.5"
 # internal crates
 aegis-core = { path = "crates/aegis-core" }
 aegis-engine = { path = "crates/aegis-engine" }
 aegis-storage = { path = "crates/aegis-storage" }
 aegis-quarantine = { path = "crates/aegis-quarantine" }
+aegis-ipc = { path = "crates/aegis-ipc" }
+aegis-daemon = { path = "crates/aegis-daemon" }
 
 [profile.release]
 opt-level = 3

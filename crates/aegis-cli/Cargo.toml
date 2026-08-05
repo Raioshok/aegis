@@ -15,8 +15,11 @@ aegis-core.workspace = true
 aegis-engine.workspace = true
 aegis-storage.workspace = true
 aegis-quarantine.workspace = true
+aegis-ipc.workspace = true
+aegis-daemon.workspace = true
 clap.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 time.workspace = true
+tokio = { workspace = true }

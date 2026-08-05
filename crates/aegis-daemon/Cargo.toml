@@ -1,0 +1,30 @@
+[package]
+name = "aegis-daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Aegis background daemon: real-time protection, IPC server, scheduler"
+
+[features]
+# fanotify requires CAP_SYS_ADMIN and pulls the version-sensitive nix binding;
+# kept opt-in so the default build/test path relies only on unprivileged inotify.
+default = []
+fanotify = ["dep:nix"]
+
+[dependencies]
+aegis-core.workspace = true
+aegis-engine.workspace = true
+aegis-storage.workspace = true
+aegis-quarantine.workspace = true
+aegis-ipc.workspace = true
+tokio.workspace = true
+inotify.workspace = true
+nix = { workspace = true, optional = true }
+sd-notify.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

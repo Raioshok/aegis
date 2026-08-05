@@ -116,6 +116,58 @@ independent engines reinforce each other (consensus).
 - **Crypto round-trip tests** prove quarantine restore is byte-identical and
   that a tampered blob is rejected by the GCM tag.
 
+## Daemon & real-time protection (Milestone 2)
+
+The daemon (`aegis-daemon`) runs three concurrent Tokio tasks over shared,
+`Arc`-wrapped [`DaemonState`] (config/whitelist behind `RwLock`, counters as
+atomics). The engine set is compiled **once** at startup and shared via `Arc`,
+so neither real-time events nor IPC scans ever recompile YARA.
+
+```mermaid
+graph LR
+    subgraph daemon["aegis-daemon (Tokio)"]
+        ST["DaemonState<br/>Arc: config, whitelist,<br/>engines, db, counters"]
+        SRV["IPC server<br/>UnixListener"]
+        MON["real-time Monitor"]
+        SCH["scheduler"]
+    end
+    W["Watcher<br/>inotify / fanotify"] -->|WatchEvent| MON
+    MON -->|spawn_blocking scan| ST
+    SRV --> ST
+    SCH -->|interval scan| ST
+    CLI["aegis CLI / future UI"] -->|framed JSON /<br/>Unix socket| SRV
+```
+
+### Real-time pipeline
+A `Watcher` (Strategy pattern again) turns filesystem activity into
+`WatchEvent`s on a dedicated OS thread, forwarded over an mpsc channel. The
+`Monitor` consumes them, runs each scan via `spawn_blocking` (so a slow scan
+never stalls the reactor), and on a threat records history and — if
+`auto_quarantine` — seals the file in the encrypted vault. Decoupling the event
+*source* from the *response* lets the whole detect-and-respond path be
+unit-tested with synthetic events, no kernel privileges required.
+
+* **inotify** (`InotifyWatcher`): unprivileged, per-directory, recursive by
+  dynamically watching new subdirectories. Scans on `CLOSE_WRITE`/`MOVED_TO` —
+  the moment a downloaded/extracted file is complete. Default backend.
+* **fanotify** (`FanotifyWatcher`, `--features fanotify`): mount-wide, requires
+  `CAP_SYS_ADMIN`; the basis for future blocking/prevention mode. Falls back to
+  inotify when privileges are missing.
+
+### IPC transport choice
+The control plane is **framed JSON over a Unix domain socket** (4-byte length
+prefix + JSON, 16 MiB cap), not HTTP. For a local privileged daemon this is the
+idiomatic, minimal-attack-surface option (cf. systemd/Docker/containerd) and is
+trivially testable over an in-memory duplex. The same `aegis-ipc` types will
+back the Tauri UI. HTTP/Axum is reserved for a *network-facing* management API
+if one is ever added (M5).
+
+### Lifecycle
+`Type=notify`: the daemon calls `sd_notify(READY=1)` once all tasks are up and
+`STOPPING=1` on teardown. Shutdown is triggered by SIGTERM, SIGINT, or an IPC
+`Shutdown`, and unblocks a `tokio::sync::Notify` every task selects on; the
+control socket is removed on exit.
+
 ## Forward-looking module layout
 
 The spec's module list maps onto future crates, added milestone by milestone:
@@ -125,8 +177,8 @@ aegis-core        ✅ domain
 aegis-engine      ✅ scanner/engine/heuristics   (+ M3: behavior, memory, rootkit)
 aegis-storage     ✅ persistence
 aegis-quarantine  ✅ quarantine
-aegis-daemon      ▢ M2  daemon, scheduler, fanotify real-time
-aegis-ipc         ▢ M2  Axum IPC API (daemon ⇄ CLI/UI)
+aegis-daemon      ✅ M2  daemon, scheduler, inotify/fanotify real-time
+aegis-ipc         ✅ M2  framed-JSON IPC over UDS (daemon ⇄ CLI/UI)
 aegis-behavior    ▢ M3  eBPF/Landlock/seccomp, ransomware guard
 aegis-firewall    ▢ M5  nftables manager
 aegis-network     ▢ M5  network IDS

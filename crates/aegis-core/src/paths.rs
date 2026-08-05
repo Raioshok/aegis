@@ -56,10 +56,36 @@ pub fn user_rules_dir() -> PathBuf {
     config_dir().join("yara-rules")
 }
 
+/// Runtime directory for the daemon socket (`$XDG_RUNTIME_DIR/aegis` per-user,
+/// or `/run/aegis` when running as the system daemon).
+pub fn runtime_dir() -> PathBuf {
+    if let Some(dir) = env_path("XDG_RUNTIME_DIR") {
+        dir.join("aegis")
+    } else if home() == std::path::Path::new("/root") {
+        PathBuf::from("/run/aegis")
+    } else {
+        data_dir().join("run")
+    }
+}
+
+/// The daemon's Unix-domain control socket.
+pub fn socket_path() -> PathBuf {
+    if let Some(explicit) = env_path("AEGIS_SOCKET") {
+        return explicit;
+    }
+    runtime_dir().join("aegisd.sock")
+}
+
 /// Ensure all runtime directories exist with restrictive permissions.
 pub fn ensure_dirs() -> std::io::Result<()> {
     use std::fs;
-    for dir in [config_dir(), data_dir(), quarantine_dir(), user_rules_dir()] {
+    for dir in [
+        config_dir(),
+        data_dir(),
+        quarantine_dir(),
+        user_rules_dir(),
+        runtime_dir(),
+    ] {
         fs::create_dir_all(&dir)?;
     }
     // Quarantine may hold live malware — lock it down to the owner.

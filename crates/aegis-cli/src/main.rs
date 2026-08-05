@@ -6,6 +6,7 @@
 
 mod commands;
 mod context;
+mod daemon_cmds;
 mod render;
 
 use clap::{Parser, Subcommand};
@@ -61,6 +62,25 @@ enum Command {
         #[command(subcommand)]
         action: QuarantineCmd,
     },
+    /// Run the background daemon in the foreground (real-time + IPC + scheduler).
+    Daemon,
+    /// Query the running daemon's status.
+    Status,
+    /// Real-time protection controls.
+    Realtime {
+        #[command(subcommand)]
+        action: RealtimeCmd,
+    },
+    /// Ask the daemon to reload its configuration and whitelist.
+    Reload,
+    /// Ask the daemon to shut down.
+    Stop,
+}
+
+#[derive(Subcommand)]
+enum RealtimeCmd {
+    /// Show real-time protection status.
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -107,7 +127,8 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: &Cli) -> aegis_core::Result<i32> {
-    // Whitelist list/add/remove don't need the DB; everything else builds App.
+    // Daemon/whitelist commands don't build the in-process App (DB); they either
+    // run the daemon or talk to it over IPC. Everything else builds App.
     match &cli.command {
         Command::Whitelist { action } => match action {
             WhitelistCmd::Add {
@@ -118,6 +139,13 @@ fn run(cli: &Cli) -> aegis_core::Result<i32> {
             WhitelistCmd::Remove { value } => commands::whitelist_remove(value),
             WhitelistCmd::List => commands::whitelist_list(),
         },
+        Command::Daemon => Ok(daemon_cmds::run_daemon()),
+        Command::Status => Ok(daemon_cmds::status(cli.json)),
+        Command::Realtime { action } => match action {
+            RealtimeCmd::Status => Ok(daemon_cmds::realtime_status()),
+        },
+        Command::Reload => Ok(daemon_cmds::reload()),
+        Command::Stop => Ok(daemon_cmds::stop()),
         other => {
             let app = App::new()?;
             match other {
@@ -132,7 +160,8 @@ fn run(cli: &Cli) -> aegis_core::Result<i32> {
                     QuarantineCmd::Restore { sha256 } => commands::quarantine_restore(&app, sha256),
                     QuarantineCmd::Delete { sha256 } => commands::quarantine_delete(&app, sha256),
                 },
-                Command::Whitelist { .. } => unreachable!(),
+                // Daemon/whitelist variants are handled at the top level.
+                _ => unreachable!("handled before App construction"),
             }
         }
     }

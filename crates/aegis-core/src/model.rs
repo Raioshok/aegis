@@ -159,7 +159,7 @@ pub struct ScanStats {
     pub threats: u64,
     pub errors: u64,
     pub bytes_scanned: u64,
-    pub duration_ms: u128,
+    pub duration_ms: u64,
 }
 
 #[cfg(test)]

@@ -1,6 +1,5 @@
-# Aegis real-time protection daemon.
-# The daemon itself is delivered in Milestone 2; this hardened unit ships now so
-# packaging and the security profile are reviewable up front.
+# Aegis real-time protection daemon (Milestone 2).
+# `aegis daemon` signals readiness via sd_notify (Type=notify).
 [Unit]
 Description=Aegis real-time protection daemon
 Documentation=https://github.com/raio/aegis
@@ -11,6 +10,8 @@ Type=notify
 ExecStart=/usr/bin/aegis daemon
 Restart=on-failure
 RestartSec=3
+RuntimeDirectory=aegis
+StateDirectory=aegis
 
 # --- Least-privilege hardening (systemd sandbox) ---
 # The daemon needs to read files across the system to scan them, but nothing
@@ -36,7 +37,10 @@ MemoryDenyWriteExecute=true
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources @mount
-# fanotify (real-time) needs CAP_SYS_ADMIN; granted narrowly in M2.
+# Default (inotify) real-time needs only read access. For the fanotify backend
+# (built with --features fanotify) add CAP_SYS_ADMIN here and drop
+# MemoryDenyWriteExecute/@mount restrictions, since fanotify uses privileged
+# syscalls. inotify is the safe default and requires no extra capability.
 CapabilityBoundingSet=CAP_DAC_READ_SEARCH
 AmbientCapabilities=CAP_DAC_READ_SEARCH
 

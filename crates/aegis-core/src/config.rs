@@ -40,6 +40,62 @@ pub struct Config {
     pub exclusions: Vec<PathBuf>,
     /// Worker threads for parallel scanning (0 = auto/all cores).
     pub threads: usize,
+    /// Real-time protection settings (daemon).
+    pub realtime: RealtimeConfig,
+    /// Scheduled-scan settings (daemon).
+    pub schedule: ScheduleConfig,
+}
+
+/// Real-time on-access protection configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RealtimeConfig {
+    /// Master switch for the real-time monitor.
+    pub enabled: bool,
+    /// Directories watched for new/changed files.
+    pub paths: Vec<PathBuf>,
+    /// Watch backend: `"inotify"` (unprivileged, per-directory) or
+    /// `"fanotify"` (mount-wide, requires CAP_SYS_ADMIN).
+    pub backend: String,
+    /// Automatically quarantine files detected in real time (no prompt).
+    pub auto_quarantine: bool,
+}
+
+impl Default for RealtimeConfig {
+    fn default() -> Self {
+        let downloads = std::env::var_os("HOME")
+            .map(|h| PathBuf::from(h).join("Downloads"))
+            .unwrap_or_else(|| PathBuf::from("/tmp"));
+        Self {
+            enabled: false,
+            paths: vec![downloads],
+            backend: "inotify".to_string(),
+            auto_quarantine: false,
+        }
+    }
+}
+
+/// Scheduled full/quick scan configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScheduleConfig {
+    /// Run a periodic scan while the daemon is up.
+    pub enabled: bool,
+    /// Interval between scheduled scans, in minutes.
+    pub interval_minutes: u64,
+    /// Target directory for the scheduled scan.
+    pub target: PathBuf,
+}
+
+impl Default for ScheduleConfig {
+    fn default() -> Self {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/"));
+        Self {
+            enabled: false,
+            interval_minutes: 720, // twice a day
+            target: home,
+        }
+    }
 }
 
 impl Default for Config {
@@ -57,6 +113,8 @@ impl Default for Config {
                 PathBuf::from("/run"),
             ],
             threads: 0,
+            realtime: RealtimeConfig::default(),
+            schedule: ScheduleConfig::default(),
         }
     }
 }

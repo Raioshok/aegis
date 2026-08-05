@@ -1,0 +1,17 @@
+[package]
+name = "aegis-ipc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Aegis daemon IPC protocol, framed codec and async client"
+
+[dependencies]
+aegis-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { version = "1", features = ["net", "io-util", "rt", "macros", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }

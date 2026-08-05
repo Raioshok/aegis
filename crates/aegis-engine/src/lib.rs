@@ -28,6 +28,16 @@ pub use yara_engine::YaraEngine;
 /// The baseline YARA rules bundled into the binary (see `rules/aegis_base.yar`).
 pub const BUNDLED_YARA: &str = include_str!("../../../rules/aegis_base.yar");
 
+/// Like [`default_engines`], but returns a shareable `Arc` for the daemon to
+/// build the engine set once and reuse across every scan and every real-time
+/// event (YARA compilation happens exactly once).
+pub fn shared_engines(
+    config: &aegis_core::Config,
+    user_rules_dir: &std::path::Path,
+) -> std::sync::Arc<Vec<Box<dyn Engine>>> {
+    std::sync::Arc::new(default_engines(config, user_rules_dir))
+}
+
 /// Build the default engine set from configuration, loading bundled + user
 /// YARA rules and the built-in hash seeds.
 pub fn default_engines(
