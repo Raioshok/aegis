@@ -6,11 +6,11 @@ Aegis aims for the polish of commercial suites (Kaspersky/Bitdefender/ESET)
 while respecting Linux philosophy: fast, memory-safe, least-privilege, no
 Electron, everything critical in Rust.
 
-> **Status: Milestone 2 — Daemon + Real-Time Protection.** On top of the M1
-> engine, Aegis now ships a background **daemon** with on-access **real-time
-> protection** (inotify / fanotify), a Unix-socket **IPC API**, and a
-> **scheduler**. The Tauri UI lands in a later milestone (see the
-> [roadmap](#roadmap)). Nothing here is a placeholder — every feature below runs.
+> **Status: Milestone 3 — Behavioural Engine.** On top of the M1 engine and M2
+> daemon, Aegis now has a **ransomware guard** (mass-encryption/rename-storm
+> detection with process kill), a **rootkit scanner**, a **memory scanner**, and
+> a **Landlock sandbox**. The Tauri UI lands next (see the [roadmap](#roadmap)).
+> Nothing here is a placeholder — every feature below runs.
 
 ---
 
@@ -34,6 +34,20 @@ Electron, everything critical in Rust.
 | **Auto-quarantine** | Optionally neutralize real-time threats instantly (encrypted vault). |
 | **IPC control** | `aegis status`, `aegis realtime status`, `aegis reload`, `aegis stop` talk to the daemon over a framed-JSON Unix socket. |
 | **Scheduler** | Periodic scans on a configurable interval, recorded to history. |
+
+### Behavioural engine (Milestone 3)
+
+| Capability | Detail |
+|---|---|
+| **Ransomware guard** | Sliding-window detection of mass-encryption (write burst + high entropy) and rename storms. Records the threat and — with the fanotify backend for process attribution — **kills** the offending process. Runs inside the daemon's real-time monitor. |
+| **Rootkit scanner** | Cross-view `/proc`⇄`/sys` integrity checks: hidden processes (task-aware, race-hardened), hidden kernel modules, `/etc/ld.so.preload`, kernel taint. `aegis rootkit`. |
+| **Memory scanner** | `/proc/<pid>/maps` analysis for W^X regions, anonymous executable memory, and executables running from a deleted file (fileless malware). `aegis memory [pid]`. |
+| **Sandbox** | Run a suspicious command confined by **Landlock** (filesystem allow-list) + rlimits (CPU/memory/file-size). `aegis sandbox -- <cmd>`. Verified: reads outside the allow-list are denied by the kernel. |
+
+> **On eBPF:** these behaviours are delivered through `/proc`, `/sys` and the
+> file-event stream (how several production Linux AVs work). eBPF-based kernel
+> syscall tracing is a planned deepening — it needs a loaded BPF program and
+> root — and layers onto the same `aegis-behavior` engine.
 
 ### Verified detections
 EICAR (hash **and** YARA), Linux reverse shells (bash `/dev/tcp`, Python,
@@ -90,7 +104,18 @@ aegis status                        # daemon health + realtime counters
 aegis realtime status               # watched paths, events, blocks
 aegis reload                        # re-read config + whitelist
 aegis stop                          # graceful shutdown
+
+# Behavioural engine (run in-process; no daemon needed)
+aegis rootkit                       # cross-view rootkit / integrity scan
+aegis memory [PID]                  # scan process memory for injected code
+aegis sandbox --allow-read /usr -- /bin/somebinary   # run confined
 ```
+
+Enable the ransomware guard in `~/.config/aegis/config.json`:
+```json
+"ransomware": { "enabled": true, "auto_kill": false }
+```
+(`auto_kill` needs the fanotify backend so the process can be attributed.)
 
 Enable real-time protection in `~/.config/aegis/config.json`:
 ```json
@@ -128,6 +153,7 @@ aegis-core        domain model, errors, config, whitelist, event bus  (no deps)
 aegis-engine      Engine trait + Hash/YARA/Heuristic + parallel Scanner
 aegis-storage     SQLite repositories (scans, threats, quarantine index)
 aegis-quarantine  AES-256-GCM vault
+aegis-behavior    ransomware guard, rootkit & memory scan, sandbox (M3)
 aegis-ipc         framed-JSON IPC protocol + async client        (M2)
 aegis-daemon      real-time monitor + IPC server + scheduler     (M2)
    ▲
@@ -149,8 +175,8 @@ aegis-cli         the `aegis` binary
 ## Roadmap
 
 - [x] **M1 — Core engine + CLI**
-- [x] **M2 — Daemon + real-time** (this release): Tokio daemon, inotify/fanotify on-access scanning, framed-JSON IPC over UDS, scheduler
-- [ ] **M3 — Behavioural + eBPF**: eBPF/Landlock/seccomp, ransomware guard, rootkit & memory scans
+- [x] **M2 — Daemon + real-time**: Tokio daemon, inotify/fanotify on-access scanning, framed-JSON IPC over UDS, scheduler
+- [x] **M3 — Behavioural engine** (this release): ransomware guard (+ process kill), rootkit scanner, memory scanner, Landlock sandbox
 - [ ] **M4 — Tauri UI**: React/TS/Tailwind/shadcn dashboard over the daemon IPC
 - [ ] **M5 — Firewall / network / plugins**: nftables manager, network IDS, signed plugin SDK
 

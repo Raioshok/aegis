@@ -15,6 +15,7 @@ aegis-core.workspace = true
 aegis-engine.workspace = true
 aegis-storage.workspace = true
 aegis-quarantine.workspace = true
+aegis-behavior.workspace = true
 aegis-ipc.workspace = true
 aegis-daemon.workspace = true
 clap.workspace = true

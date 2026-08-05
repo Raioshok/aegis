@@ -89,10 +89,20 @@ fn run(fan: nix::sys::fanotify::Fanotify, tx: mpsc::Sender<WatchEvent>) {
                 Ok(p) => p,
                 Err(_) => continue,
             };
+            // fanotify attributes the originating process.
+            let pid = {
+                let p = event.pid();
+                if p > 0 {
+                    Some(p as u32)
+                } else {
+                    None
+                }
+            };
             if tx
                 .blocking_send(WatchEvent {
                     path,
                     kind: super::EventKind::Written,
+                    pid,
                 })
                 .is_err()
             {

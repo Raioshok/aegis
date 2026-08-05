@@ -44,7 +44,21 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 tracing::info!(backend, ?watched, "real-time protection enabled");
                 match watcher.take_events() {
                     Some(rx) => {
-                        let monitor = Monitor::new(state.clone(), config.realtime.auto_quarantine);
+                        let mut monitor =
+                            Monitor::new(state.clone(), config.realtime.auto_quarantine);
+                        // Attach the ransomware behavioural guard when enabled.
+                        if config.ransomware.enabled {
+                            let rc = &config.ransomware;
+                            let guard_cfg = aegis_behavior::RansomwareConfig {
+                                window_ms: rc.window_ms,
+                                max_writes: rc.max_writes,
+                                entropy_threshold: rc.entropy_threshold,
+                                min_high_entropy: rc.min_high_entropy,
+                                rename_storm: rc.rename_storm,
+                            };
+                            monitor = monitor.with_ransomware(guard_cfg, rc.auto_kill);
+                            tracing::info!(auto_kill = rc.auto_kill, "ransomware guard enabled");
+                        }
                         // The watcher's background thread owns the inotify/fanotify
                         // fd independently, so dropping `watcher` here is safe —
                         // events keep flowing until the receiver is dropped.

@@ -98,7 +98,15 @@ fn run(mut inotify: Inotify, roots: Vec<PathBuf>, tx: mpsc::Sender<WatchEvent>) 
             } else {
                 EventKind::Written
             };
-            if tx.blocking_send(WatchEvent { path: full, kind }).is_err() {
+            // inotify cannot attribute the originating process.
+            if tx
+                .blocking_send(WatchEvent {
+                    path: full,
+                    kind,
+                    pid: None,
+                })
+                .is_err()
+            {
                 return; // receiver dropped → daemon shutting down
             }
         }

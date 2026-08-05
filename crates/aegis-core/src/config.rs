@@ -44,6 +44,42 @@ pub struct Config {
     pub realtime: RealtimeConfig,
     /// Scheduled-scan settings (daemon).
     pub schedule: ScheduleConfig,
+    /// Ransomware behavioural-guard settings (daemon).
+    pub ransomware: RansomwareSettings,
+}
+
+/// Behavioural ransomware-guard configuration (plain data; mapped to the
+/// behaviour engine's config in the daemon).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RansomwareSettings {
+    pub enabled: bool,
+    /// Sliding detection window in milliseconds.
+    pub window_ms: u64,
+    /// Writes within the window to consider a burst.
+    pub max_writes: usize,
+    /// Entropy at/above which written content looks encrypted.
+    pub entropy_threshold: f64,
+    /// High-entropy writes within the window required to alert.
+    pub min_high_entropy: usize,
+    /// Renames to the same extension required to flag a rename storm.
+    pub rename_storm: usize,
+    /// Kill the offending process on detection (needs the fanotify backend for
+    /// process attribution).
+    pub auto_kill: bool,
+}
+
+impl Default for RansomwareSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            window_ms: 5_000,
+            max_writes: 20,
+            entropy_threshold: 7.5,
+            min_high_entropy: 12,
+            rename_storm: 12,
+            auto_kill: false,
+        }
+    }
 }
 
 /// Real-time on-access protection configuration.
@@ -115,6 +151,7 @@ impl Default for Config {
             threads: 0,
             realtime: RealtimeConfig::default(),
             schedule: ScheduleConfig::default(),
+            ransomware: RansomwareSettings::default(),
         }
     }
 }

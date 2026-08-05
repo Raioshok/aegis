@@ -1,0 +1,18 @@
+[package]
+name = "aegis-behavior"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Aegis behavioral engine: ransomware guard, rootkit & memory scanners, sandbox"
+
+[dependencies]
+aegis-core.workspace = true
+aegis-engine.workspace = true
+serde.workspace = true
+tracing.workspace = true
+nix = { workspace = true, features = ["signal", "resource", "process"] }
+landlock = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

@@ -168,6 +168,35 @@ if one is ever added (M5).
 `Shutdown`, and unblocks a `tokio::sync::Notify` every task selects on; the
 control socket is removed on exit.
 
+## Behavioural engine (Milestone 3)
+
+`aegis-behavior` adds signature-less, activity-based defence. Every detector is
+built around **pure, testable cores** with the live system wired in at the edges.
+
+* **Ransomware guard** (`ransomware`) — a time-injectable sliding-window
+  detector. `observe(path, kind, entropy, pid, now_ms)` is a pure function, so
+  the entire decision (write-burst + high-entropy → *MassEncryption*; many
+  same-extension renames → *RenameStorm*) is unit-tested deterministically. The
+  daemon's `Monitor` feeds it every file event (computing content entropy),
+  records a threat on alert, and — when the fanotify backend attributes a PID —
+  calls `response::kill_pid`. With inotify (no PID) it alerts without killing.
+* **Rootkit scanner** (`rootkit`) — cross-view detection: a fact seen two ways,
+  any disagreement flagged. Hidden processes compare a **task-aware** `/proc`
+  listing (union of every `task/` dir, so threads aren't false-positived)
+  against a direct-stat probe, with a second pass to absorb races. Hidden
+  modules diff `/proc/modules` against `/sys/module`. Parsers are pure and
+  unit-tested; the live scan wires them to the filesystem.
+* **Memory scanner** (`memory`) — a pure `/proc/<pid>/maps` parser + classifier
+  flags W^X regions, anonymous executable memory, and executables backed by a
+  deleted file (fileless malware).
+* **Sandbox** (`sandbox`) — `landlock` (safe crate) builds a filesystem
+  allow-list domain; `nix` sets rlimits. A launcher restricts *itself* then
+  `exec`s the target (safe `CommandExt::exec`), so the confinement is inherited
+  with no `unsafe` and no fork.
+
+All of `aegis-behavior` is `#![forbid(unsafe_code)]`; process control and
+Landlock go through safe `nix`/`landlock` wrappers.
+
 ## Forward-looking module layout
 
 The spec's module list maps onto future crates, added milestone by milestone:
@@ -179,7 +208,7 @@ aegis-storage     ✅ persistence
 aegis-quarantine  ✅ quarantine
 aegis-daemon      ✅ M2  daemon, scheduler, inotify/fanotify real-time
 aegis-ipc         ✅ M2  framed-JSON IPC over UDS (daemon ⇄ CLI/UI)
-aegis-behavior    ▢ M3  eBPF/Landlock/seccomp, ransomware guard
+aegis-behavior    ✅ M3  ransomware guard, rootkit/memory scan, Landlock sandbox
 aegis-firewall    ▢ M5  nftables manager
 aegis-network     ▢ M5  network IDS
 aegis-plugins     ▢ M5  signed plugin SDK

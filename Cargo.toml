@@ -5,6 +5,7 @@ members = [
     "crates/aegis-engine",
     "crates/aegis-storage",
     "crates/aegis-quarantine",
+    "crates/aegis-behavior",
     "crates/aegis-ipc",
     "crates/aegis-daemon",
     "crates/aegis-cli",
@@ -62,6 +63,7 @@ aegis-core = { path = "crates/aegis-core" }
 aegis-engine = { path = "crates/aegis-engine" }
 aegis-storage = { path = "crates/aegis-storage" }
 aegis-quarantine = { path = "crates/aegis-quarantine" }
+aegis-behavior = { path = "crates/aegis-behavior" }
 aegis-ipc = { path = "crates/aegis-ipc" }
 aegis-daemon = { path = "crates/aegis-daemon" }
 

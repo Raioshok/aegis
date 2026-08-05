@@ -36,6 +36,9 @@ pub enum EventKind {
 pub struct WatchEvent {
     pub path: PathBuf,
     pub kind: EventKind,
+    /// Originating process, when the backend can attribute it (fanotify). The
+    /// inotify backend cannot, so this is `None` there.
+    pub pid: Option<u32>,
 }
 
 /// A source of [`WatchEvent`]s. Implementations push events into an mpsc

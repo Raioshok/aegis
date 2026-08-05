@@ -16,7 +16,7 @@ pub mod model;
 pub mod paths;
 pub mod whitelist;
 
-pub use config::{Config, EngineToggles, RealtimeConfig, ScheduleConfig};
+pub use config::{Config, EngineToggles, RansomwareSettings, RealtimeConfig, ScheduleConfig};
 pub use error::{AegisError, Result};
 pub use event::{Event, EventBus};
 pub use model::{Detection, FileVerdict, ScanStats, Severity, ThreatClass};

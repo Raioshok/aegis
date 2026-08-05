@@ -4,6 +4,7 @@
 //! same commands proxy to the background daemon over IPC; today they run the
 //! scan engine directly in-process.
 
+mod behavior_cmds;
 mod commands;
 mod context;
 mod daemon_cmds;
@@ -75,6 +76,28 @@ enum Command {
     Reload,
     /// Ask the daemon to shut down.
     Stop,
+    /// Scan the system for rootkits (cross-view /proc & /sys integrity checks).
+    Rootkit,
+    /// Scan process memory for injection / W^X / deleted-backing code.
+    Memory {
+        /// A specific PID to scan (default: all accessible processes).
+        pid: Option<u32>,
+    },
+    /// Run a command confined by Landlock + resource limits.
+    Sandbox {
+        /// Extra paths the command may read/execute (repeatable).
+        #[arg(long = "allow-read", value_name = "PATH")]
+        allow_read: Vec<PathBuf>,
+        /// Extra paths the command may write (repeatable).
+        #[arg(long = "allow-write", value_name = "PATH")]
+        allow_write: Vec<PathBuf>,
+        /// CPU-seconds limit for the command.
+        #[arg(long)]
+        cpu: Option<u64>,
+        /// The command and its arguments, after `--`.
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -146,6 +169,19 @@ fn run(cli: &Cli) -> aegis_core::Result<i32> {
         },
         Command::Reload => Ok(daemon_cmds::reload()),
         Command::Stop => Ok(daemon_cmds::stop()),
+        Command::Rootkit => Ok(behavior_cmds::rootkit(cli.json)),
+        Command::Memory { pid } => Ok(behavior_cmds::memory(*pid, cli.json)),
+        Command::Sandbox {
+            allow_read,
+            allow_write,
+            cpu,
+            command,
+        } => Ok(behavior_cmds::sandbox(
+            allow_read.clone(),
+            allow_write.clone(),
+            *cpu,
+            command.clone(),
+        )),
         other => {
             let app = App::new()?;
             match other {
