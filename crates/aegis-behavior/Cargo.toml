@@ -13,6 +13,8 @@ serde.workspace = true
 tracing.workspace = true
 nix = { workspace = true, features = ["signal", "resource", "process"] }
 landlock = "0.4"
+seccompiler = "0.5"
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

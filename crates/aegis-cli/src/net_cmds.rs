@@ -202,6 +202,59 @@ pub fn network_scan(json: bool) -> i32 {
     print_detections(&title, &dets)
 }
 
+// --- DNS analysis -----------------------------------------------------
+
+/// `aegis dns <domain>...` — score domains for DNS-tunneling / DGA traits.
+/// With no arguments, scores query names from `~/.config/aegis/dns-queries.txt`.
+#[allow(clippy::print_literal)]
+pub fn dns_check(domains: &[String]) -> i32 {
+    let names: Vec<String> = if domains.is_empty() {
+        match std::fs::read_to_string(paths::config_dir().join("dns-queries.txt")) {
+            Ok(text) => text
+                .lines()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .collect(),
+            Err(_) => {
+                eprintln!("no domains given and no ~/.config/aegis/dns-queries.txt found");
+                return 2;
+            }
+        }
+    } else {
+        domains.to_vec()
+    };
+
+    println!("{BOLD}{:<8} {}{RESET}", "SCORE", "DOMAIN");
+    let mut worst = 0.0f64;
+    for name in &names {
+        let score = aegis_network::tunnel_score(name);
+        worst = worst.max(score);
+        let color = if score >= 0.6 {
+            RED
+        } else if score >= 0.4 {
+            render::CYAN
+        } else {
+            GREEN
+        };
+        let flag = if aegis_network::is_suspicious(name) {
+            "  ⚠ likely DNS tunnel / DGA"
+        } else {
+            ""
+        };
+        println!(
+            "{}   {}{}",
+            render::paint(color, &format!("{score:.2}")),
+            name,
+            render::paint(DIM, flag)
+        );
+    }
+    if worst >= 0.6 {
+        1
+    } else {
+        0
+    }
+}
+
 // --- plugins ----------------------------------------------------------
 
 pub fn plugins_list() -> i32 {
@@ -263,4 +316,82 @@ pub fn plugins_keygen() -> i32 {
         kp.private_hex()
     );
     0
+}
+
+/// `aegis plugins sign <dir> --key <private_hex>` — sign a plugin's manifest.
+pub fn plugins_sign(dir: &std::path::Path, private_hex: &str) -> i32 {
+    use aegis_plugin::{KeyPair, PluginManifest};
+    let manifest_path = dir.join("plugin.json");
+    let manifest: PluginManifest = match std::fs::read_to_string(&manifest_path) {
+        Ok(t) => match serde_json::from_str(&t) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("bad plugin.json: {e}");
+                return 2;
+            }
+        },
+        Err(e) => {
+            eprintln!("no plugin.json in {}: {e}", dir.display());
+            return 2;
+        }
+    };
+    let kp = match KeyPair::from_private_hex(private_hex.trim()) {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("invalid private key: {e}");
+            return 2;
+        }
+    };
+    let sig = kp.sign(&manifest);
+    if let Err(e) = std::fs::write(dir.join("plugin.sig"), &sig) {
+        eprintln!("failed to write plugin.sig: {e}");
+        return 2;
+    }
+    println!("{} signed {}", render::paint(GREEN, "✓"), dir.display());
+    println!(
+        "  {DIM}public key (add to trusted-keys.txt): {}{RESET}",
+        kp.public_hex()
+    );
+    0
+}
+
+/// `aegis plugins run <dir> [--target PATH]` — execute a trusted plugin.
+pub fn plugins_run(dir: &std::path::Path, target: Option<String>) -> i32 {
+    use aegis_plugin::{Permission, PluginRequest};
+    use std::time::Duration;
+
+    let trust = TrustStore::load(&trust_file());
+    let plugin = aegis_plugin::evaluate(dir, &trust);
+    let req = PluginRequest {
+        action: "scan".into(),
+        target,
+        required_permission: Permission::Scan,
+    };
+    match aegis_plugin::run(&plugin, &req, Duration::from_secs(30)) {
+        Ok(resp) => {
+            if let Some(err) = resp.error {
+                eprintln!("plugin error: {err}");
+                return 2;
+            }
+            println!(
+                "{BOLD}{} returned {} detection(s){RESET}",
+                dir.display(),
+                resp.detections.len()
+            );
+            for d in &resp.detections {
+                let sev = Severity::from_u8(d.severity);
+                println!(
+                    "  {}  {} — {}",
+                    render::sev_paint(sev, &format!("[{}]", sev.label())),
+                    d.threat,
+                    d.detail
+                );
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!("{}", render::paint(RED, &format!("refused: {e}")));
+            2
+        }
+    }
 }

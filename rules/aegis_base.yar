@@ -15,6 +15,10 @@ rule EICAR_Test_File
         $eicar
 }
 
+// ELF magic (0x7f 'E' 'L' 'F'), little-endian at offset 0. Script-intent rules
+// exclude compiled binaries to avoid matching incidental strings in them.
+private rule IsELF { condition: uint32(0) == 0x464c457f }
+
 rule Linux_Reverse_Shell_Bash
 {
     meta:
@@ -25,7 +29,7 @@ rule Linux_Reverse_Shell_Bash
         $b = "0>&1"
         $c = "bash -i"
     condition:
-        $a and ($b or $c)
+        not IsELF and $a and ($b or $c)
 }
 
 rule Linux_Reverse_Shell_Python
@@ -50,7 +54,7 @@ rule Dropper_Curl_Pipe_Shell
     strings:
         $a = /(curl|wget)\s+[^\n|]{0,200}\|\s*(bash|sh|zsh)/
     condition:
-        $a
+        not IsELF and $a
 }
 
 rule Obfuscation_Base64_Exec
@@ -62,7 +66,7 @@ rule Obfuscation_Base64_Exec
         $a = /base64\s+(-d|--decode)[^\n|]{0,60}\|\s*(bash|sh|python)/
         $b = /eval\s*\(\s*(atob|Buffer\.from|base64_decode)/
     condition:
-        any of them
+        not IsELF and any of them
 }
 
 rule Linux_CryptoMiner
@@ -85,9 +89,9 @@ rule Linux_Persistence_Cron_SSH
         description = "Writes to cron or authorized_keys for persistence"
         severity    = "low"
     strings:
-        $cron    = "/etc/cron"
-        $ak      = ".ssh/authorized_keys"
-        $crontab = "crontab -"
+        // Require write/append intent, not a bare path mention.
+        $a = /(>>?)\s*\S{0,40}(\/etc\/cron|\.ssh\/authorized_keys)/
+        $b = /\|\s*crontab\s+-/
     condition:
-        any of them
+        not IsELF and any of them
 }

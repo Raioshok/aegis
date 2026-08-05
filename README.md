@@ -218,6 +218,29 @@ app/              Tauri v2 desktop UI (React/TS)                 (M4)
 (behavioural), eBPF/pcap packet inspection (network), a WASM plugin runtime, and
 Windows/macOS bundling of the UI.
 
+### Post-milestone hardening pass
+
+A follow-up pass tightened every rough edge flagged during the milestones:
+
+- **Heuristic precision** — behavioural string patterns are now script-aware
+  (a `/etc/cron` or `LD_PRELOAD=` string inside a compiled binary no longer
+  fires), the YARA rules exclude ELF for script-intent detections, and the
+  persistence/LD_PRELOAD rules require actual malicious intent. This cut
+  `/usr/bin` false positives from **34 → 9** while keeping every real detection.
+- **Sandbox seccomp** — the Landlock+rlimit sandbox now also installs a
+  **seccomp-BPF** denylist (ptrace, mount, kexec, `init_module`, `bpf`, `setns`,
+  `unshare`, …), completing the isolation triad.
+- **Plugins actually run** — the SDK gained an out-of-process **runner** (JSON
+  over stdin/stdout, trust + permission enforced, timeout) and `aegis plugins
+  sign` / `run`, so the full keygen → sign → trust → run flow works end-to-end;
+  tampering the manifest breaks the signature and execution is refused.
+- **DNS analysis reachable** — the DNS-tunnel/DGA scorer is now exposed via
+  `aegis dns <domain>…`.
+
+Genuinely root/kernel-blocked items remain honestly deferred: live fanotify
+verification, eBPF, and write-interception ransomware rollback all require
+privileges/kernel programs that can't be exercised unprivileged.
+
 ---
 
 ## Quality

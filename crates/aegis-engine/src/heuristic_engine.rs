@@ -43,17 +43,28 @@ struct Pattern {
     reason: &'static str,
     severity: Severity,
     class: ThreatClass,
+    /// Whether this pattern is meaningful inside a compiled ELF/PE binary.
+    ///
+    /// Most behavioural patterns describe *interpreted* intent (a bash/python
+    /// one-liner). Those strings appearing incidentally inside a compiled
+    /// binary — e.g. `/etc/cron` in a keyring GUI or `LD_PRELOAD=` in a wrapper —
+    /// are not evidence of malice and were the source of false positives on
+    /// system binaries. Such patterns run on scripts/text only. Traits that are
+    /// genuinely damning even in a binary (cryptominer pool strings) set this to
+    /// `true`.
+    binary_ok: bool,
 }
 
 fn patterns() -> &'static [Pattern] {
     static PATTERNS: OnceLock<Vec<Pattern>> = OnceLock::new();
     PATTERNS.get_or_init(|| {
-        let p = |re: &str, threat, reason, severity, class| Pattern {
+        let p = |re: &str, threat, reason, severity, class, binary_ok| Pattern {
             re: Regex::new(re).expect("valid heuristic regex"),
             threat,
             reason,
             severity,
             class,
+            binary_ok,
         };
         vec![
             p(
@@ -62,6 +73,7 @@ fn patterns() -> &'static [Pattern] {
                 "Bash reverse shell via /dev/tcp",
                 Severity::High,
                 ThreatClass::ReverseShell,
+                false, // /dev/tcp is a bash feature — meaningless in a binary
             ),
             p(
                 r"(?i)nc\s+-[a-z]*e\s+/bin/(sh|bash)",
@@ -69,6 +81,7 @@ fn patterns() -> &'static [Pattern] {
                 "Netcat backdoor (nc -e)",
                 Severity::High,
                 ThreatClass::ReverseShell,
+                false,
             ),
             p(
                 r"(?is)socket\.socket\([^)]*\).{0,120}connect\([^)]*\).{0,200}(dup2|/bin/sh|/bin/bash)",
@@ -76,6 +89,7 @@ fn patterns() -> &'static [Pattern] {
                 "Python reverse-shell pattern",
                 Severity::High,
                 ThreatClass::ReverseShell,
+                false,
             ),
             p(
                 r"(?i)(curl|wget)\s+[^\n|;&]{0,200}\|\s*(bash|sh|zsh|python)",
@@ -83,6 +97,7 @@ fn patterns() -> &'static [Pattern] {
                 "Remote payload piped to an interpreter",
                 Severity::Medium,
                 ThreatClass::Heuristic,
+                false,
             ),
             p(
                 r"(?i)(base64\s+-d|base64\s+--decode)[^\n|]{0,60}\|\s*(bash|sh|python)",
@@ -90,6 +105,7 @@ fn patterns() -> &'static [Pattern] {
                 "Base64-decoded content piped to a shell",
                 Severity::Medium,
                 ThreatClass::Heuristic,
+                false,
             ),
             p(
                 r"(?i)eval\s*\(\s*(atob|Buffer\.from|base64_decode)",
@@ -97,6 +113,7 @@ fn patterns() -> &'static [Pattern] {
                 "eval() of decoded/obfuscated payload",
                 Severity::Medium,
                 ThreatClass::Heuristic,
+                false,
             ),
             p(
                 r"(?i)(os\.system|subprocess\.(call|Popen|run))\([^)]{0,80}(rm\s+-rf\s+/|mkfs|dd\s+if=)",
@@ -104,13 +121,18 @@ fn patterns() -> &'static [Pattern] {
                 "Destructive system command",
                 Severity::High,
                 ThreatClass::Heuristic,
+                false,
             ),
             p(
-                r"(?i)(crontab\s+-|/etc/cron|\.ssh/authorized_keys|/etc/systemd/system)",
+                // Require write/install *intent* (redirect into, or piping to
+                // crontab) rather than a mere mention, so legitimate scripts
+                // that only reference these paths are not flagged.
+                r"(?i)((>>?)\s*\S{0,40}(/etc/cron|\.ssh/authorized_keys)|\|\s*crontab\s+-)",
                 "Suspicious.Persistence",
-                "Writes to a persistence location (cron/systemd/authorized_keys)",
+                "Writes to a persistence location (cron/authorized_keys)",
                 Severity::Low,
                 ThreatClass::Persistence,
+                false,
             ),
             p(
                 r"(?i)(stratum\+tcp://|--donate-level|cryptonight|xmrig)",
@@ -118,13 +140,18 @@ fn patterns() -> &'static [Pattern] {
                 "Cryptominer configuration strings",
                 Severity::High,
                 ThreatClass::CryptoMiner,
+                true, // miner pool strings are damning even inside an ELF
             ),
             p(
-                r"(?i)LD_PRELOAD\s*=",
+                // Only flag LD_PRELOAD pointing at a writable/temp/hidden path —
+                // the actual injection pattern. Legitimate wrappers preload from
+                // system library paths, which this ignores.
+                r#"(?i)LD_PRELOAD\s*=\s*["']?(/tmp/|/dev/shm/|/var/tmp/|/run/shm/)"#,
                 "Suspicious.LdPreload",
-                "LD_PRELOAD injection",
+                "LD_PRELOAD from a temporary path (injection)",
                 Severity::Low,
                 ThreatClass::Heuristic,
+                false,
             ),
         ]
     })
@@ -209,11 +236,17 @@ impl Engine for HeuristicEngine {
             }
         }
 
-        // 3. Behavioural byte patterns (scripts + ELF strings).
-        if !is_binary || is_elf {
+        // 3. Behavioural byte patterns. Script-intent patterns run on text/
+        //    script content only; a pattern must opt in (`binary_ok`) to be
+        //    evaluated against a compiled ELF/PE, which avoids false positives
+        //    from incidental strings inside system binaries.
+        let is_executable = is_elf || is_pe;
+        let is_texty = !is_binary; // no NUL byte in the header → text/script
+        {
             let region = &data[..data.len().min(1024 * 1024)];
             for pat in patterns() {
-                if pat.re.is_match(region) {
+                let applicable = is_texty || (is_executable && pat.binary_ok);
+                if applicable && pat.re.is_match(region) {
                     out.push(Detection::new(
                         "Heuristic",
                         pat.threat,
@@ -279,5 +312,42 @@ mod tests {
     fn clean_text_is_clean() {
         let eng = HeuristicEngine::default();
         assert!(eng.scan(&ctx(b"just some ordinary notes here")).is_empty());
+    }
+
+    /// A synthetic ELF containing a benign `/etc/cron` string (like a real
+    /// keyring GUI) must NOT be flagged for persistence — this was the
+    /// system-binary false positive.
+    #[test]
+    fn elf_with_incidental_cron_string_is_not_flagged() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x7fELF\x02\x01\x01\0");
+        data.extend_from_slice(&[0u8; 32]); // binary content (NUL bytes)
+        data.extend_from_slice(b"open /etc/cron.d/session for editing\0");
+        data.extend_from_slice(b"LD_PRELOAD=libfoo.so wrapper\0");
+        let d = HeuristicEngine::default().scan(&ctx(&data));
+        assert!(
+            !d.iter().any(|x| x.threat.contains("Persistence")),
+            "persistence string in an ELF must not fire: {d:?}"
+        );
+        assert!(!d.iter().any(|x| x.threat.contains("LdPreload")));
+    }
+
+    /// The same string in an actual shell script SHOULD be flagged.
+    #[test]
+    fn script_with_cron_string_is_flagged() {
+        let d = HeuristicEngine::default()
+            .scan(&ctx(b"#!/bin/sh\necho '* * * * * evil' | crontab -\n"));
+        assert!(d.iter().any(|x| x.threat.contains("Persistence")));
+    }
+
+    /// Cryptominer pool strings are damning even inside a binary.
+    #[test]
+    fn elf_with_miner_strings_is_flagged() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x7fELF\x02\x01\x01\0");
+        data.extend_from_slice(&[0u8; 16]);
+        data.extend_from_slice(b"stratum+tcp://pool.evil:3333\0xmrig\0");
+        let d = HeuristicEngine::default().scan(&ctx(&data));
+        assert!(d.iter().any(|x| x.threat.contains("CryptoMiner")));
     }
 }

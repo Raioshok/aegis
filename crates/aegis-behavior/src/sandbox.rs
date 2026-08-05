@@ -31,6 +31,8 @@ pub struct SandboxPolicy {
     pub address_space: Option<u64>,
     /// Maximum size of any file the process may create, in bytes.
     pub file_size: Option<u64>,
+    /// Install a seccomp-BPF filter denying dangerous syscalls.
+    pub seccomp: bool,
 }
 
 impl Default for SandboxPolicy {
@@ -46,6 +48,7 @@ impl Default for SandboxPolicy {
             cpu_seconds: Some(10),
             address_space: Some(512 * 1024 * 1024),
             file_size: Some(64 * 1024 * 1024),
+            seccomp: true,
         }
     }
 }
@@ -55,6 +58,59 @@ impl Default for SandboxPolicy {
 pub struct SandboxOutcome {
     pub landlock: RulesetStatus,
     pub limits_applied: bool,
+    pub seccomp_applied: bool,
+}
+
+/// Syscalls a confined analysis target should never need — blocking them denies
+/// the usual sandbox-escape / anti-analysis primitives. This is a **denylist**
+/// (everything else is allowed), so it confines without breaking ordinary
+/// programs. Numbers come from `libc::SYS_*` so they are correct per-arch.
+fn dangerous_syscalls() -> Vec<i64> {
+    let mut v = vec![
+        libc::SYS_ptrace,            // debugger / process injection
+        libc::SYS_mount,             // mount tricks
+        libc::SYS_umount2,           //
+        libc::SYS_pivot_root,        // fs-root escape
+        libc::SYS_chroot,            //
+        libc::SYS_reboot,            // reboot/power
+        libc::SYS_kexec_load,        // load a new kernel
+        libc::SYS_init_module,       // load kernel module
+        libc::SYS_finit_module,      //
+        libc::SYS_delete_module,     //
+        libc::SYS_bpf,               // load BPF programs
+        libc::SYS_perf_event_open,   // perf/side-channels
+        libc::SYS_setns,             // enter another namespace
+        libc::SYS_unshare,           // create namespaces (escape)
+        libc::SYS_process_vm_writev, // write into other processes
+        libc::SYS_kexec_file_load,   //
+    ];
+    v.sort_unstable();
+    v.dedup();
+    v
+}
+
+#[cfg(target_arch = "x86_64")]
+const SECCOMP_ARCH: seccompiler::TargetArch = seccompiler::TargetArch::x86_64;
+#[cfg(target_arch = "aarch64")]
+const SECCOMP_ARCH: seccompiler::TargetArch = seccompiler::TargetArch::aarch64;
+
+/// Build the seccomp-BPF program for the denylist. Pure — does not install it,
+/// so it is unit-testable without affecting the test process.
+pub fn build_seccomp_filter() -> Result<seccompiler::BpfProgram, String> {
+    use std::collections::BTreeMap;
+    // Empty rule vec = match the syscall unconditionally.
+    let rules: BTreeMap<i64, Vec<seccompiler::SeccompRule>> = dangerous_syscalls()
+        .into_iter()
+        .map(|s| (s, vec![]))
+        .collect();
+    let filter = seccompiler::SeccompFilter::new(
+        rules,
+        seccompiler::SeccompAction::Allow, // default: allow non-listed syscalls
+        seccompiler::SeccompAction::Errno(libc::EPERM as u32), // listed: deny
+        SECCOMP_ARCH,
+    )
+    .map_err(|e| format!("build seccomp filter: {e}"))?;
+    seccompiler::BpfProgram::try_from(filter).map_err(|e| format!("compile seccomp: {e}"))
 }
 
 /// Whether the running kernel enforces Landlock at all.
@@ -85,9 +141,20 @@ pub fn restrict_current(
             AccessFs::from_all(abi),
         ))?
         .restrict_self()?;
+
+    // Seccomp last: Landlock's restrict_self has already set no_new_privs, which
+    // seccomp also requires. Applies to the current thread; inherited across exec.
+    let mut seccomp_applied = false;
+    if policy.seccomp {
+        let prog = build_seccomp_filter()?;
+        seccompiler::apply_filter(&prog).map_err(|e| format!("apply seccomp: {e}"))?;
+        seccomp_applied = true;
+    }
+
     Ok(SandboxOutcome {
         landlock: status.ruleset,
         limits_applied: true,
+        seccomp_applied,
     })
 }
 
@@ -113,6 +180,15 @@ mod tests {
         let p = SandboxPolicy::default();
         assert!(!p.read_exec.is_empty());
         assert!(p.cpu_seconds.is_some());
+        assert!(p.seccomp);
+    }
+
+    #[test]
+    fn seccomp_filter_builds() {
+        // Build (but do not install) the BPF program — installing would confine
+        // the test runner. A valid, non-empty program is proof enough.
+        let prog = build_seccomp_filter().expect("filter builds");
+        assert!(!prog.is_empty());
     }
 
     #[test]

@@ -15,8 +15,10 @@
 
 pub mod manifest;
 pub mod registry;
+pub mod runner;
 pub mod signature;
 
 pub use manifest::{Permission, PluginManifest, API_VERSION};
 pub use registry::{discover, evaluate, DiscoveredPlugin, PluginStatus, TrustStore};
+pub use runner::{run, PluginDetection, PluginRequest, PluginResponse, RunError};
 pub use signature::{verify, KeyPair};

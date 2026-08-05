@@ -106,6 +106,11 @@ enum Command {
     },
     /// Scan live network connections for C2 / backdoor / Tor indicators.
     Network,
+    /// Score domain names for DNS-tunneling / DGA characteristics.
+    Dns {
+        /// Domains to score (default: read ~/.config/aegis/dns-queries.txt).
+        domains: Vec<String>,
+    },
     /// Manage signed plugins.
     Plugins {
         #[command(subcommand)]
@@ -141,6 +146,18 @@ enum PluginsCmd {
     Verify { dir: PathBuf },
     /// Generate a new plugin signing key pair.
     Keygen,
+    /// Sign a plugin's manifest with a private key.
+    Sign {
+        dir: PathBuf,
+        #[arg(long)]
+        key: String,
+    },
+    /// Execute a trusted plugin (enforcing its signature + permissions).
+    Run {
+        dir: PathBuf,
+        #[arg(long)]
+        target: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -223,10 +240,13 @@ fn run(cli: &Cli) -> aegis_core::Result<i32> {
             FirewallCmd::Flush => net_cmds::firewall_flush(),
         }),
         Command::Network => Ok(net_cmds::network_scan(cli.json)),
+        Command::Dns { domains } => Ok(net_cmds::dns_check(domains)),
         Command::Plugins { action } => Ok(match action {
             PluginsCmd::List => net_cmds::plugins_list(),
             PluginsCmd::Verify { dir } => net_cmds::plugins_verify(dir),
             PluginsCmd::Keygen => net_cmds::plugins_keygen(),
+            PluginsCmd::Sign { dir, key } => net_cmds::plugins_sign(dir, key),
+            PluginsCmd::Run { dir, target } => net_cmds::plugins_run(dir, target.clone()),
         }),
         Command::Sandbox {
             allow_read,
