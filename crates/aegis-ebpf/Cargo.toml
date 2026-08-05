@@ -1,0 +1,18 @@
+[package]
+name = "aegis-ebpf"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Aegis eBPF syscall tracer (loads a real BPF program to trace exec)"
+
+[[bin]]
+name = "aegis-trace"
+path = "src/main.rs"
+
+[dependencies]
+libbpf-rs = "0.24"
+libc = "0.2"
+
+[build-dependencies]
+libbpf-cargo = "0.24"

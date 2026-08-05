@@ -16,5 +16,14 @@ landlock = "0.4"
 seccompiler = "0.5"
 libc = "0.2"
 
+[features]
+# Write-interception ransomware rollback via fanotify permission events.
+# Requires CAP_SYS_ADMIN at runtime.
+rollback = ["nix/fanotify"]
+
 [dev-dependencies]
 tempfile = "3"
+
+[[example]]
+name = "rollback_guard"
+required-features = ["rollback"]

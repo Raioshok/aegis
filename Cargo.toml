@@ -12,6 +12,7 @@ members = [
     "crates/aegis-firewall",
     "crates/aegis-network",
     "crates/aegis-plugin",
+    "crates/aegis-ebpf",
     "crates/aegis-ipc",
     "crates/aegis-daemon",
     "crates/aegis-cli",

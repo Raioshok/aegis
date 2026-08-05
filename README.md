@@ -187,6 +187,7 @@ aegis-behavior    ransomware guard, rootkit & memory scan, sandbox (M3)
 aegis-firewall    nftables manager + connection inspector        (M5)
 aegis-network     network IDS (C2/DNS-tunnel/Tor/listeners)      (M5)
 aegis-plugin      ed25519-signed plugin SDK                      (M5)
+aegis-ebpf        eBPF exec/syscall tracer (real BPF program)    (privileged)
 aegis-ipc         framed-JSON IPC protocol + async client        (M2)
 aegis-daemon      real-time monitor + IPC server + scheduler     (M2)
    ▲
@@ -237,9 +238,30 @@ A follow-up pass tightened every rough edge flagged during the milestones:
 - **DNS analysis reachable** — the DNS-tunnel/DGA scorer is now exposed via
   `aegis dns <domain>…`.
 
-Genuinely root/kernel-blocked items remain honestly deferred: live fanotify
-verification, eBPF, and write-interception ransomware rollback all require
-privileges/kernel programs that can't be exercised unprivileged.
+### Privileged subsystems (verified with root)
+
+The three items that need kernel privileges are implemented and were verified
+end-to-end as root on this machine:
+
+- **fanotify real-time (verified live)** — `aegis daemon` built with
+  `--features fanotify` runs as root, marks a mount, and detects threats
+  on-access *with PID attribution* (which inotify cannot give). Confirmed by
+  dropping a reverse-shell into a fanotify-watched mount and seeing
+  `realtime on · fanotify · N events`.
+- **eBPF syscall tracing** (`aegis-ebpf` crate → `aegis-trace` binary) — a real
+  BPF program (`bpf/trace.bpf.c`) is compiled by clang, loaded into the kernel,
+  and attached to the `sys_enter_execve` tracepoint, streaming every `execve`
+  system-wide to userspace over a BPF ring buffer. Verified capturing live
+  exec() activity as root. `sudo cargo run -p aegis-ebpf`.
+- **Ransomware rollback via write-interception** (`aegis-behavior` →
+  `rollback_guard` example, `--features rollback`) — uses fanotify **permission
+  events** (`FAN_OPEN_PERM`) to snapshot each file's original bytes *before* a
+  write is allowed, then on a detected encryption burst kills the process and
+  **restores every file from its pre-write snapshot**. Verified: a simulated
+  ransomware run was stopped mid-attack and **10/10 files survived byte-identical**.
+
+Deeper still (not yet built): eBPF LSM/packet programs, and integrating the
+rollback guard + eBPF feed directly into the daemon's event pipeline.
 
 ---
 

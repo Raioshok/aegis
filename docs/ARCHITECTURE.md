@@ -263,6 +263,40 @@ The final layer adds three independent, `unsafe`-free crates:
 Connection/DNS-level analysis covers the network threat classes without a packet
 pipeline; eBPF/pcap packet inspection is the planned deepening.
 
+## Privileged subsystems (root-verified)
+
+Three capabilities require kernel privileges; all are implemented and were
+verified end-to-end as root.
+
+### fanotify real-time (`aegis-daemon`, `--features fanotify`)
+`FanotifyWatcher` uses `FAN_CLASS_NOTIF` + `FAN_MARK_MOUNT` for unprivileged-safe
+notification (no blocking) with **PID attribution** from `event.pid()` — the
+capability inotify lacks, and what makes ransomware auto-kill possible. Verified
+by dropping malware into a fanotify-marked tmpfs mount and observing detection.
+
+### eBPF syscall tracing (`aegis-ebpf` → `aegis-trace`)
+A real BPF program (`bpf/trace.bpf.c`) compiled by clang and loaded via
+`libbpf-rs` (skeleton generated at build time by `libbpf-cargo`). It attaches to
+the `sys_enter_execve` tracepoint and emits `{pid, uid, comm, filename}` over a
+`BPF_MAP_TYPE_RINGBUF` to userspace. The tracepoint context is declared manually
+(stable ABI) so no `vmlinux.h`/CO-RE relocation is needed. This is kernel-level
+behavioural visibility that no `/proc`-based approach can match; it is the
+foundation the M3 behavioural engine will consume in a future pipeline.
+
+### Ransomware rollback via write-interception (`aegis-behavior`, `--features rollback`)
+The `rollback_guard` uses fanotify **permission events** (`FAN_CLASS_CONTENT` +
+`FAN_OPEN_PERM`): every `open()` on the guarded mount is intercepted *before it
+proceeds*, the file's original bytes are snapshotted, and only then is the open
+`FAN_ALLOW`-ed. Reads use the fanotify-provided fd (never a fresh `open()`) to
+avoid the classic PERM-handler self-deadlock. When the reused [`RansomwareGuard`]
+trips on an entropy burst, the guard removes its mark (so restore writes aren't
+re-intercepted), kills the offending PID, and restores every file from its
+pre-write snapshot — recovering originals that pure detection cannot. Verified:
+a simulated attack was halted mid-run with **10/10 files intact**.
+
+Every permission event is always answered (ALLOW on any error) and the guard
+operates on a single mount, so a fault can never hang the wider system.
+
 ## Forward-looking module layout
 
 The spec's module list maps onto future crates, added milestone by milestone:

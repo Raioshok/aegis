@@ -10,6 +10,10 @@ description = "Aegis command-line interface"
 name = "aegis"
 path = "src/main.rs"
 
+[features]
+# Enable the privileged fanotify real-time backend in the bundled daemon.
+fanotify = ["aegis-daemon/fanotify"]
+
 [dependencies]
 aegis-core.workspace = true
 aegis-engine.workspace = true
