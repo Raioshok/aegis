@@ -197,6 +197,45 @@ built around **pure, testable cores** with the live system wired in at the edges
 All of `aegis-behavior` is `#![forbid(unsafe_code)]`; process control and
 Landlock go through safe `nix`/`landlock` wrappers.
 
+## Desktop UI (Milestone 4)
+
+The UI (`app/`) is a **Tauri v2** application — a Rust host process embedding a
+system WebView that renders a React/TypeScript frontend. No Electron, no Node
+backend; the only runtime is the Rust binary plus the OS WebView.
+
+```mermaid
+graph LR
+    subgraph app["Tauri app (one Rust process)"]
+        UI["WebView<br/>React + TS + Tailwind + Framer Motion"]
+        BR["Rust bridge<br/>app/src-tauri (commands.rs)"]
+    end
+    UI -->|invoke() IPC| BR
+    BR --> ENG["aegis-engine (scan)"]
+    BR --> ST["aegis-storage (history, quarantine)"]
+    BR --> QU["aegis-quarantine"]
+    BR --> BH["aegis-behavior (rootkit, memory)"]
+    BR --> CORE["aegis-core (whitelist, config)"]
+    BR -.->|aegis-ipc / UDS| DA["aegis daemon<br/>(live status, real-time)"]
+```
+
+* **Bridge** (`app/src-tauri/src/commands.rs`) — typed `#[tauri::command]`
+  functions. Scans/history/quarantine/whitelist/rootkit/memory call the engine
+  crates **directly** (so the UI works with no daemon), and heavy work is offloaded
+  with `spawn_blocking`. Live daemon status + real-time counters come from the
+  running daemon over `aegis-ipc`; when it's down the UI shows "daemon not
+  running" and everything else still functions.
+* **Frontend** (`app/src`) — React 18 + strict TypeScript, Vite build, Tailwind
+  design tokens, Framer-Motion page/element transitions, lucide icons, and
+  shadcn-style hand-built primitives (`components/ui`). A thin typed `lib/api.ts`
+  wraps every `invoke()` call so the React side never touches strings.
+* **Isolation** — the app is its own cargo package (`aegis-ui`) **excluded** from
+  the library workspace (Tauri needs its own build profile); it path-depends on
+  the sibling engine crates.
+
+Verified live: the app compiles and runs on this machine's Wayland session, the
+dashboard renders real engine health and DB stats through the bridge, and
+navigation/whitelist/quarantine round-trip to the Rust backend.
+
 ## Forward-looking module layout
 
 The spec's module list maps onto future crates, added milestone by milestone:
@@ -212,5 +251,5 @@ aegis-behavior    ✅ M3  ransomware guard, rootkit/memory scan, Landlock sandbo
 aegis-firewall    ▢ M5  nftables manager
 aegis-network     ▢ M5  network IDS
 aegis-plugins     ▢ M5  signed plugin SDK
-aegis-ui (Tauri)  ▢ M4  React/TS/Tailwind/shadcn
+aegis-ui (Tauri)  ✅ M4  React/TS/Tailwind/Framer-Motion desktop app
 ```

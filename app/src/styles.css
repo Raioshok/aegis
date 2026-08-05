@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+    background-image:
+      radial-gradient(1200px 600px at 80% -10%, rgba(47, 129, 247, 0.12), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(63, 185, 80, 0.08), transparent 55%);
+    background-attachment: fixed;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full;
+    background: rgba(255, 255, 255, 0.12);
+  }
+}
+
+@layer components {
+  .glass {
+    @apply border border-border bg-surface backdrop-blur-xl shadow-glass;
+  }
+  .card {
+    @apply glass rounded-2xl;
+  }
+}

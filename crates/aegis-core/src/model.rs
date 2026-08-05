@@ -24,6 +24,17 @@ pub enum Severity {
 }
 
 impl Severity {
+    /// Reconstruct from the stored integer value (saturating).
+    pub fn from_u8(v: u8) -> Severity {
+        match v {
+            0 => Severity::Clean,
+            1 => Severity::Low,
+            2 => Severity::Medium,
+            3 => Severity::High,
+            _ => Severity::Critical,
+        }
+    }
+
     /// Short human label.
     pub fn label(self) -> &'static str {
         match self {

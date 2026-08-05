@@ -6,11 +6,11 @@ Aegis aims for the polish of commercial suites (Kaspersky/Bitdefender/ESET)
 while respecting Linux philosophy: fast, memory-safe, least-privilege, no
 Electron, everything critical in Rust.
 
-> **Status: Milestone 3 — Behavioural Engine.** On top of the M1 engine and M2
-> daemon, Aegis now has a **ransomware guard** (mass-encryption/rename-storm
-> detection with process kill), a **rootkit scanner**, a **memory scanner**, and
-> a **Landlock sandbox**. The Tauri UI lands next (see the [roadmap](#roadmap)).
-> Nothing here is a placeholder — every feature below runs.
+> **Status: Milestone 4 — Desktop UI.** A native **Tauri v2** desktop app
+> (React + TypeScript + Tailwind + Framer Motion) now sits on top of the engine,
+> daemon and behavioural layers, talking to them through the Rust bridge and the
+> `aegis-ipc` protocol. Firewall/network/plugins land next (see the
+> [roadmap](#roadmap)). Nothing here is a placeholder — every feature below runs.
 
 ---
 
@@ -34,6 +34,22 @@ Electron, everything critical in Rust.
 | **Auto-quarantine** | Optionally neutralize real-time threats instantly (encrypted vault). |
 | **IPC control** | `aegis status`, `aegis realtime status`, `aegis reload`, `aegis stop` talk to the daemon over a framed-JSON Unix socket. |
 | **Scheduler** | Periodic scans on a configurable interval, recorded to history. |
+
+### Desktop UI (Milestone 4)
+
+A native **Tauri v2** app in [`app/`](app) — no Electron, no Node backend. The
+Rust bridge (`app/src-tauri`) exposes typed commands that call the Aegis engine
+crates directly (scans, history, quarantine, whitelist, rootkit/memory) and the
+daemon over `aegis-ipc` (live status + real-time counters).
+
+- **Stack:** React 18 + TypeScript (strict) + Vite + TailwindCSS + Framer Motion + lucide icons; shadcn-style hand-built components.
+- **Design:** glassmorphism, dark theme, animated page transitions, live-updating dashboard.
+- **Pages:** Dashboard (protection status, engine health, stats), Scan, Threats & History, Whitelist, Quarantine (restore/delete), Behavior (rootkit + memory scans).
+
+```bash
+cd app && npm install && npm run tauri dev   # run the desktop app
+npm run tauri build                          # bundle an AppImage / .deb
+```
 
 ### Behavioural engine (Milestone 3)
 
@@ -176,8 +192,8 @@ aegis-cli         the `aegis` binary
 
 - [x] **M1 — Core engine + CLI**
 - [x] **M2 — Daemon + real-time**: Tokio daemon, inotify/fanotify on-access scanning, framed-JSON IPC over UDS, scheduler
-- [x] **M3 — Behavioural engine** (this release): ransomware guard (+ process kill), rootkit scanner, memory scanner, Landlock sandbox
-- [ ] **M4 — Tauri UI**: React/TS/Tailwind/shadcn dashboard over the daemon IPC
+- [x] **M3 — Behavioural engine**: ransomware guard (+ process kill), rootkit scanner, memory scanner, Landlock sandbox
+- [x] **M4 — Tauri UI** (this release): React/TS/Tailwind/Framer-Motion desktop app over the Rust bridge + daemon IPC
 - [ ] **M5 — Firewall / network / plugins**: nftables manager, network IDS, signed plugin SDK
 
 ---
