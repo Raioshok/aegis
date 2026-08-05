@@ -23,6 +23,7 @@ aegis-behavior = { path = "../../crates/aegis-behavior" }
 aegis-firewall = { path = "../../crates/aegis-firewall" }
 aegis-network = { path = "../../crates/aegis-network" }
 aegis-plugin = { path = "../../crates/aegis-plugin" }
+aegis-optimize = { path = "../../crates/aegis-optimize" }
 aegis-ipc = { path = "../../crates/aegis-ipc" }
 
 [features]

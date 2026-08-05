@@ -36,6 +36,20 @@ Electron, everything critical in Rust.
 | **IPC control** | `aegis status`, `aegis realtime status`, `aegis reload`, `aegis stop` talk to the daemon over a framed-JSON Unix socket. |
 | **Scheduler** | Periodic scans on a configurable interval, recorded to history. |
 
+### System & network optimizer (Arch tune-up)
+
+A Kaspersky-style tune-up, but Arch-native and safe (`aegis-optimize`):
+
+| Area | What it does |
+|---|---|
+| **Reclaim space** | Scans the pacman package cache, orphaned packages, systemd journal, `~/.cache`, `/tmp` and reports exactly how much each can free. `aegis optimize`. |
+| **Network tune-up** | Compares your TCP/network sysctls to a throughput+latency profile (BBR, `cake`/`fq`, ≥16 MB buffers, TCP Fast Open, MTU probing) and reports each as **optimal** or recommends a change — plus a DNS-latency probe. `aegis optimize network`. |
+| **Apply** | `aegis optimize clean [--apply]` (paccache / journal / orphans / `~/.cache`) and `aegis optimize tune [--apply]` (writes `/etc/sysctl.d/99-aegis-network.conf`). **Dry-run by default** — nothing changes without `--apply`. |
+
+Scanning is read-only. The optimizer is *smart*: on an already-tuned box it
+reports settings as optimal instead of nagging. Also available as the **Optimize**
+page in the desktop UI.
+
 ### Firewall, network IDS & plugins (Milestone 5)
 
 | Capability | Detail |
@@ -187,6 +201,7 @@ aegis-behavior    ransomware guard, rootkit & memory scan, sandbox (M3)
 aegis-firewall    nftables manager + connection inspector        (M5)
 aegis-network     network IDS (C2/DNS-tunnel/Tor/listeners)      (M5)
 aegis-plugin      ed25519-signed plugin SDK                      (M5)
+aegis-optimize    Arch system + network tune-up (Kaspersky-style)
 aegis-ebpf        eBPF exec/syscall tracer (real BPF program)    (privileged)
 aegis-ipc         framed-JSON IPC protocol + async client        (M2)
 aegis-daemon      real-time monitor + IPC server + scheduler     (M2)

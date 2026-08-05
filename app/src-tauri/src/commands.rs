@@ -449,6 +449,56 @@ pub struct PluginRow {
     pub permissions: Vec<String>,
 }
 
+#[derive(Serialize)]
+pub struct OptimizeFinding {
+    pub category: String,
+    pub title: String,
+    pub detail: String,
+    pub impact: u8,
+    pub impact_label: String,
+    pub reclaimable: u64,
+    pub reclaimable_human: String,
+    pub action: Option<String>,
+    pub needs_root: bool,
+}
+
+#[derive(Serialize)]
+pub struct OptimizeReport {
+    pub findings: Vec<OptimizeFinding>,
+    pub total_reclaimable: u64,
+    pub total_reclaimable_human: String,
+    pub opportunities: usize,
+}
+
+#[tauri::command]
+pub async fn optimize_scan() -> Result<OptimizeReport, String> {
+    let report = tokio::task::spawn_blocking(aegis_optimize::full_scan)
+        .await
+        .map_err(|e| e.to_string())?;
+    let findings = report
+        .findings
+        .iter()
+        .map(|f| OptimizeFinding {
+            category: f.category.clone(),
+            title: f.title.clone(),
+            detail: f.detail.clone(),
+            impact: f.impact as u8,
+            impact_label: f.impact.label().to_string(),
+            reclaimable: f.reclaimable,
+            reclaimable_human: aegis_optimize::human_bytes(f.reclaimable),
+            action: f.action.clone(),
+            needs_root: f.needs_root,
+        })
+        .collect();
+    let total = report.total_reclaimable();
+    Ok(OptimizeReport {
+        findings,
+        total_reclaimable: total,
+        total_reclaimable_human: aegis_optimize::human_bytes(total),
+        opportunities: report.actionable().count(),
+    })
+}
+
 #[tauri::command]
 pub async fn plugins_list() -> Result<Vec<PluginRow>, String> {
     let dir = aegis_core::paths::config_dir().join("plugins");

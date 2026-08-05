@@ -24,6 +24,7 @@ fn main() {
             commands::memory_scan,
             commands::network_scan,
             commands::plugins_list,
+            commands::optimize_scan,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Aegis");

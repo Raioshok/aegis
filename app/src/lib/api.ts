@@ -78,6 +78,24 @@ export interface PluginRow {
   permissions: string[];
 }
 
+export interface OptimizeFinding {
+  category: string;
+  title: string;
+  detail: string;
+  impact: number;
+  impact_label: string;
+  reclaimable: number;
+  reclaimable_human: string;
+  action: string | null;
+  needs_root: boolean;
+}
+export interface OptimizeReport {
+  findings: OptimizeFinding[];
+  total_reclaimable: number;
+  total_reclaimable_human: string;
+  opportunities: number;
+}
+
 export const api = {
   dashboard: () => invoke<Dashboard>("dashboard"),
   runScan: (path: string) => invoke<ScanReport>("run_scan", { path }),
@@ -94,7 +112,21 @@ export const api = {
   memoryScan: (pid?: number) => invoke<ThreatRow[]>("memory_scan", { pid: pid ?? null }),
   networkScan: () => invoke<NetworkReport>("network_scan"),
   pluginsList: () => invoke<PluginRow[]>("plugins_list"),
+  optimizeScan: () => invoke<OptimizeReport>("optimize_scan"),
 };
+
+export function impactColor(i: number): string {
+  switch (i) {
+    case 0:
+      return "text-ok";
+    case 1:
+      return "text-accent";
+    case 2:
+      return "text-warn";
+    default:
+      return "text-danger";
+  }
+}
 
 export function severityColor(sev: number): string {
   switch (sev) {

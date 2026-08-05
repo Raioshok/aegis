@@ -9,6 +9,7 @@ import {
   Lock,
   Radar,
   Network as NetIcon,
+  Rocket,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Dashboard from "@/pages/Dashboard";
@@ -18,6 +19,7 @@ import Whitelist from "@/pages/Whitelist";
 import Quarantine from "@/pages/Quarantine";
 import Behavior from "@/pages/Behavior";
 import Network from "@/pages/Network";
+import Optimize from "@/pages/Optimize";
 
 type PageId =
   | "dashboard"
@@ -26,7 +28,8 @@ type PageId =
   | "whitelist"
   | "quarantine"
   | "behavior"
-  | "network";
+  | "network"
+  | "optimize";
 
 const NAV: { id: PageId; label: string; icon: JSX.Element }[] = [
   { id: "dashboard", label: "Dashboard", icon: <Activity size={18} /> },
@@ -36,6 +39,7 @@ const NAV: { id: PageId; label: string; icon: JSX.Element }[] = [
   { id: "quarantine", label: "Quarantine", icon: <Lock size={18} /> },
   { id: "behavior", label: "Behavior", icon: <Radar size={18} /> },
   { id: "network", label: "Network", icon: <NetIcon size={18} /> },
+  { id: "optimize", label: "Optimize", icon: <Rocket size={18} /> },
 ];
 
 export default function App() {
@@ -93,6 +97,7 @@ export default function App() {
             {page === "quarantine" && <Quarantine />}
             {page === "behavior" && <Behavior />}
             {page === "network" && <Network />}
+            {page === "optimize" && <Optimize />}
           </motion.div>
         </AnimatePresence>
       </main>
