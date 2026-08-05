@@ -387,3 +387,85 @@ pub async fn memory_scan(pid: Option<u32>) -> Result<Vec<ThreatRow>, String> {
     .map_err(|e| e.to_string())?;
     Ok(detection_rows(dets))
 }
+
+#[derive(Serialize)]
+pub struct ConnRow {
+    pub protocol: String,
+    pub local: String,
+    pub remote: String,
+    pub state: String,
+}
+
+#[derive(Serialize)]
+pub struct NetworkReport {
+    pub findings: Vec<ThreatRow>,
+    pub connections: Vec<ConnRow>,
+    pub listening: usize,
+    pub established: usize,
+}
+
+#[tauri::command]
+pub async fn network_scan() -> Result<NetworkReport, String> {
+    let report = tokio::task::spawn_blocking(|| {
+        let blocklist = aegis_network::IpBlocklist::from_file(
+            &aegis_core::paths::config_dir().join("ip-blocklist.txt"),
+        );
+        let conns = aegis_firewall::connections::all();
+        let findings = detection_rows(
+            conns
+                .iter()
+                .flat_map(|c| aegis_network::classify(c, &blocklist))
+                .collect(),
+        );
+        let listening = conns.iter().filter(|c| c.is_listening()).count();
+        let established = conns.iter().filter(|c| c.is_established()).count();
+        let rows = conns
+            .iter()
+            .filter(|c| c.is_listening() || c.is_established())
+            .map(|c| ConnRow {
+                protocol: c.protocol.to_string(),
+                local: format!("{}:{}", c.local, c.local_port),
+                remote: format!("{}:{}", c.remote, c.remote_port),
+                state: c.state.to_string(),
+            })
+            .collect();
+        NetworkReport {
+            findings,
+            connections: rows,
+            listening,
+            established,
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(report)
+}
+
+#[derive(Serialize)]
+pub struct PluginRow {
+    pub name: String,
+    pub status: String,
+    pub trusted: bool,
+    pub permissions: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn plugins_list() -> Result<Vec<PluginRow>, String> {
+    let dir = aegis_core::paths::config_dir().join("plugins");
+    let trust = aegis_plugin::TrustStore::load(
+        &aegis_core::paths::config_dir().join("trusted-keys.txt"),
+    );
+    Ok(aegis_plugin::discover(&dir, &trust)
+        .into_iter()
+        .map(|p| PluginRow {
+            name: p
+                .manifest
+                .as_ref()
+                .map(|m| m.name.clone())
+                .unwrap_or_else(|| "?".into()),
+            status: format!("{:?}", p.status),
+            trusted: p.is_enabled(),
+            permissions: p.permissions().iter().map(|x| format!("{x:?}")).collect(),
+        })
+        .collect())
+}

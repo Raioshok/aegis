@@ -6,11 +6,12 @@ Aegis aims for the polish of commercial suites (Kaspersky/Bitdefender/ESET)
 while respecting Linux philosophy: fast, memory-safe, least-privilege, no
 Electron, everything critical in Rust.
 
-> **Status: Milestone 4 — Desktop UI.** A native **Tauri v2** desktop app
-> (React + TypeScript + Tailwind + Framer Motion) now sits on top of the engine,
-> daemon and behavioural layers, talking to them through the Rust bridge and the
-> `aegis-ipc` protocol. Firewall/network/plugins land next (see the
-> [roadmap](#roadmap)). Nothing here is a placeholder — every feature below runs.
+> **Status: Milestone 5 — Firewall, Network IDS & Plugins.** All five milestones
+> are complete. On top of the engine, daemon, behavioural and UI layers, Aegis
+> now has an **nftables firewall manager**, a **network intrusion-detection**
+> engine (C2 / DNS-tunnel / Tor / exposed-listener detection), and a
+> **cryptographically-signed plugin SDK**. Nothing here is a placeholder — every
+> feature below runs, with 70 passing tests across the workspace.
 
 ---
 
@@ -34,6 +35,19 @@ Electron, everything critical in Rust.
 | **Auto-quarantine** | Optionally neutralize real-time threats instantly (encrypted vault). |
 | **IPC control** | `aegis status`, `aegis realtime status`, `aegis reload`, `aegis stop` talk to the daemon over a framed-JSON Unix socket. |
 | **Scheduler** | Periodic scans on a configurable interval, recorded to history. |
+
+### Firewall, network IDS & plugins (Milestone 5)
+
+| Capability | Detail |
+|---|---|
+| **Firewall** | Manages its own `inet aegis` nftables table (never clashes with ufw/firewalld). Block/unblock IPs & CIDRs, live connection viewer. `aegis firewall block <ip>` / `connections` / `apply`. |
+| **Network IDS** | Classifies live `/proc/net` connections: blocklisted C2 IPs (CIDR threat intel), backdoor/reverse-shell/Tor ports, exposed `0.0.0.0` listeners. DNS-tunnel/DGA scoring. `aegis network`. |
+| **Signed plugins** | ed25519-signed, permissioned plugin SDK. A plugin runs **only** if its manifest signature verifies against a trusted key and its API matches — tampering (even adding a permission) breaks trust. Plugins execute out-of-process, sandboxable via the M3 Landlock sandbox. `aegis plugins list/verify/keygen`. |
+
+> **On eBPF/pcap:** connection- and DNS-level analysis (via `/proc/net`) covers
+> C2, reverse shells, DNS tunneling, malicious IPs and Tor without a
+> packet-capture pipeline. Packet-level eBPF/pcap inspection is the natural next
+> deepening of this layer.
 
 ### Desktop UI (Milestone 4)
 
@@ -170,10 +184,14 @@ aegis-engine      Engine trait + Hash/YARA/Heuristic + parallel Scanner
 aegis-storage     SQLite repositories (scans, threats, quarantine index)
 aegis-quarantine  AES-256-GCM vault
 aegis-behavior    ransomware guard, rootkit & memory scan, sandbox (M3)
+aegis-firewall    nftables manager + connection inspector        (M5)
+aegis-network     network IDS (C2/DNS-tunnel/Tor/listeners)      (M5)
+aegis-plugin      ed25519-signed plugin SDK                      (M5)
 aegis-ipc         framed-JSON IPC protocol + async client        (M2)
 aegis-daemon      real-time monitor + IPC server + scheduler     (M2)
    ▲
 aegis-cli         the `aegis` binary
+app/              Tauri v2 desktop UI (React/TS)                 (M4)
 ```
 
 ## Data locations (XDG)
@@ -193,8 +211,12 @@ aegis-cli         the `aegis` binary
 - [x] **M1 — Core engine + CLI**
 - [x] **M2 — Daemon + real-time**: Tokio daemon, inotify/fanotify on-access scanning, framed-JSON IPC over UDS, scheduler
 - [x] **M3 — Behavioural engine**: ransomware guard (+ process kill), rootkit scanner, memory scanner, Landlock sandbox
-- [x] **M4 — Tauri UI** (this release): React/TS/Tailwind/Framer-Motion desktop app over the Rust bridge + daemon IPC
-- [ ] **M5 — Firewall / network / plugins**: nftables manager, network IDS, signed plugin SDK
+- [x] **M4 — Tauri UI**: React/TS/Tailwind/Framer-Motion desktop app over the Rust bridge + daemon IPC
+- [x] **M5 — Firewall / network / plugins** (this release): nftables manager, network IDS, ed25519-signed plugin SDK
+
+**All five milestones complete.** Natural next deepenings: eBPF syscall tracing
+(behavioural), eBPF/pcap packet inspection (network), a WASM plugin runtime, and
+Windows/macOS bundling of the UI.
 
 ---
 

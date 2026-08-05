@@ -22,6 +22,8 @@ fn main() {
             commands::remove_whitelist,
             commands::rootkit_scan,
             commands::memory_scan,
+            commands::network_scan,
+            commands::plugins_list,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Aegis");

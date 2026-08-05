@@ -59,6 +59,25 @@ export interface WhitelistRow {
   recursive: boolean;
 }
 
+export interface ConnRow {
+  protocol: string;
+  local: string;
+  remote: string;
+  state: string;
+}
+export interface NetworkReport {
+  findings: ThreatRow[];
+  connections: ConnRow[];
+  listening: number;
+  established: number;
+}
+export interface PluginRow {
+  name: string;
+  status: string;
+  trusted: boolean;
+  permissions: string[];
+}
+
 export const api = {
   dashboard: () => invoke<Dashboard>("dashboard"),
   runScan: (path: string) => invoke<ScanReport>("run_scan", { path }),
@@ -73,6 +92,8 @@ export const api = {
   removeWhitelist: (value: string) => invoke<void>("remove_whitelist", { value }),
   rootkitScan: () => invoke<ThreatRow[]>("rootkit_scan"),
   memoryScan: (pid?: number) => invoke<ThreatRow[]>("memory_scan", { pid: pid ?? null }),
+  networkScan: () => invoke<NetworkReport>("network_scan"),
+  pluginsList: () => invoke<PluginRow[]>("plugins_list"),
 };
 
 export function severityColor(sev: number): string {

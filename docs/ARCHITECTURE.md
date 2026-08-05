@@ -236,6 +236,33 @@ Verified live: the app compiles and runs on this machine's Wayland session, the
 dashboard renders real engine health and DB stats through the bridge, and
 navigation/whitelist/quarantine round-trip to the Rust backend.
 
+## Firewall, network IDS & plugins (Milestone 5)
+
+The final layer adds three independent, `unsafe`-free crates:
+
+* **`aegis-firewall`** — owns a dedicated `inet aegis` nftables table so it never
+  disturbs a system firewall. The [`model`](../crates/aegis-firewall/src/model.rs)
+  translates rules to an `nft` script as a **pure, tested** function; applying it
+  is isolated in [`apply`](../crates/aegis-firewall/src/apply.rs) because it needs
+  `CAP_NET_ADMIN`. [`connections`](../crates/aegis-firewall/src/connections.rs)
+  parses `/proc/net/{tcp,tcp6,udp,udp6}` — the hex address/port/state decoding is
+  a pure function tested against known values.
+* **`aegis-network`** (IDS) — classifies live connections and DNS activity:
+  CIDR threat-intel blocklist matching, backdoor/reverse-shell/Tor port
+  detection, exposed-`0.0.0.0`-listener flags (RFC1918/loopback-aware), and a
+  DNS-tunnel/DGA suspicion score (entropy/length/label features). All decision
+  logic is pure and unit-tested; the live scan reads `/proc/net`.
+* **`aegis-plugin`** — a signed plugin SDK. A plugin is a directory with a
+  `plugin.json` manifest and a `plugin.sig` ed25519 signature; the registry
+  enables it **only** if the signature verifies against a host trust-store key
+  *and* the API version matches. Because the signature covers the manifest,
+  tampering with declared permissions invalidates it (tested). Plugins execute
+  out-of-process and can be confined with the M3 Landlock sandbox, so a plugin
+  never shares the host address space.
+
+Connection/DNS-level analysis covers the network threat classes without a packet
+pipeline; eBPF/pcap packet inspection is the planned deepening.
+
 ## Forward-looking module layout
 
 The spec's module list maps onto future crates, added milestone by milestone:
@@ -248,8 +275,8 @@ aegis-quarantine  ✅ quarantine
 aegis-daemon      ✅ M2  daemon, scheduler, inotify/fanotify real-time
 aegis-ipc         ✅ M2  framed-JSON IPC over UDS (daemon ⇄ CLI/UI)
 aegis-behavior    ✅ M3  ransomware guard, rootkit/memory scan, Landlock sandbox
-aegis-firewall    ▢ M5  nftables manager
-aegis-network     ▢ M5  network IDS
-aegis-plugins     ▢ M5  signed plugin SDK
+aegis-firewall    ✅ M5  nftables manager + connection inspector
+aegis-network     ✅ M5  network IDS (connection/DNS analysis)
+aegis-plugin      ✅ M5  ed25519-signed plugin SDK
 aegis-ui (Tauri)  ✅ M4  React/TS/Tailwind/Framer-Motion desktop app
 ```
