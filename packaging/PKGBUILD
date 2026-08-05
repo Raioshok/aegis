@@ -1,0 +1,48 @@
+# Maintainer: Aegis Contributors
+pkgname=aegis
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Aegis — next-generation native antivirus platform for Linux (CLI + engine)"
+arch=('x86_64')
+url="https://github.com/raio/aegis"
+license=('GPL3')
+depends=('gcc-libs')
+makedepends=('rust' 'cargo')
+optdepends=('systemd: background daemon (Milestone 2)')
+backup=("etc/aegis/config.json")
+options=('!lto')  # workspace already configures thin LTO
+source=()
+sha256sums=()
+
+build() {
+    cd "$srcdir/.."
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo build --release --frozen --bin aegis
+}
+
+check() {
+    cd "$srcdir/.."
+    cargo test --release --workspace
+}
+
+package() {
+    cd "$srcdir/.."
+    install -Dm755 "target/release/aegis" "$pkgdir/usr/bin/aegis"
+
+    # Bundled YARA rules
+    install -Dm644 "rules/aegis_base.yar" \
+        "$pkgdir/usr/share/aegis/rules/aegis_base.yar"
+
+    # systemd unit for the (upcoming) real-time daemon
+    install -Dm644 "packaging/aegis-daemon.service" \
+        "$pkgdir/usr/lib/systemd/system/aegis-daemon.service"
+
+    # Docs
+    install -Dm644 "README.md" "$pkgdir/usr/share/doc/aegis/README.md"
+    install -Dm644 "docs/ARCHITECTURE.md" \
+        "$pkgdir/usr/share/doc/aegis/ARCHITECTURE.md"
+
+    # License
+    install -Dm644 "LICENSE" "$pkgdir/usr/share/licenses/aegis/LICENSE" 2>/dev/null || true
+}

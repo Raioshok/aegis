@@ -1,0 +1,67 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/aegis-core",
+    "crates/aegis-engine",
+    "crates/aegis-storage",
+    "crates/aegis-quarantine",
+    "crates/aegis-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90"
+authors = ["Aegis Contributors"]
+license = "GPL-3.0-or-later"
+repository = "https://github.com/raio/aegis"
+description = "Aegis — a next-generation, native antivirus platform for Linux"
+
+# Shared dependency versions — pinned to mature, widely-audited crate lines for
+# reproducible builds. Newer major lines (sha2 0.11, aes-gcm 0.11) are avoided
+# deliberately in M1 to keep the transitive API surface stable.
+[workspace.dependencies]
+# error handling & logging
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# concurrency & fs
+rayon = "1"
+walkdir = "2"
+memmap2 = "0.9"
+# hashing
+sha2 = "0.10"
+sha1 = "0.10"
+md-5 = "0.10"
+# detection
+yara-x = "1"
+regex = "1"
+infer = "0.15"
+# crypto (quarantine at rest)
+aes-gcm = "0.10"
+rand = "0.8"
+zeroize = "1"
+# storage
+rusqlite = { version = "0.31", features = ["bundled"] }
+# cli & time
+clap = { version = "4", features = ["derive"] }
+time = { version = "0.3", features = ["formatting", "macros"] }
+# internal crates
+aegis-core = { path = "crates/aegis-core" }
+aegis-engine = { path = "crates/aegis-engine" }
+aegis-storage = { path = "crates/aegis-storage" }
+aegis-quarantine = { path = "crates/aegis-quarantine" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.bench]
+lto = "thin"

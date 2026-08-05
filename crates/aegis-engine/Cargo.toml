@@ -1,0 +1,28 @@
+[package]
+name = "aegis-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Aegis detection engines and parallel scan orchestrator"
+
+[dependencies]
+aegis-core.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+rayon.workspace = true
+walkdir.workspace = true
+sha2.workspace = true
+sha1.workspace = true
+md-5.workspace = true
+yara-x.workspace = true
+regex.workspace = true
+infer.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "engine_bench"
+harness = false

@@ -1,0 +1,13 @@
+[package]
+name = "aegis-storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Aegis persistence: scan history and quarantine index (SQLite)"
+
+[dependencies]
+aegis-core.workspace = true
+rusqlite.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
