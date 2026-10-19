@@ -207,6 +207,16 @@ async fn handle_connection(
             let stats = state.stats.read().await.clone();
             ("200 OK", serde_json::to_string(&stats).unwrap_or("{}".into()))
         }
+        ("GET", "/train.py") | ("GET", "/api/v1/train.py") => {
+            let script_path = std::path::PathBuf::from(r"C:\Users\raio\Downloads\Telegram Desktop\Projects\aegis\scripts\training\aegis-guest-train.py");
+            let content = std::fs::read_to_string(script_path)
+                .unwrap_or_else(|_| "print('Aegis Gateway Live')".to_string());
+            ("200 OK", content)
+        }
+        ("GET", "/train.sh") => {
+            let content = "#!/usr/bin/env bash\ncurl -sSL http://172.17.48.1:9090/train.py | python3\n";
+            ("200 OK", content.to_string())
+        }
         ("GET", "/api/v1/signatures") => {
             let home = std::env::var("USERPROFILE")
                 .or_else(|_| std::env::var("HOME"))
