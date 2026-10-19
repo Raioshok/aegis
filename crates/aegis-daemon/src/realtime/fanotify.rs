@@ -1,4 +1,6 @@
 //! Privileged, mount-wide real-time watcher built on `fanotify`.
+
+#![cfg(target_os = "linux")]
 //!
 //! fanotify sees activity across an entire mount and (in permission mode) can
 //! *block* access until a verdict is reached — the basis for true prevention.

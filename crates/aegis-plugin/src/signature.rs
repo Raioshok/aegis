@@ -54,6 +54,30 @@ impl KeyPair {
         })
     }
 
+    /// Load a signing key from a file (enforcing 0600 on Unix).
+    pub fn from_file(path: &std::path::Path) -> Result<Self, SigError> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(path) {
+                let mode = meta.permissions().mode();
+                if mode & 0o077 != 0 {
+                    tracing::warn!("signing key file has loose permissions; want 0600");
+                }
+            }
+        }
+        let content = std::fs::read_to_string(path).map_err(|_| SigError::Hex(hex::FromHexError::InvalidStringLength))?;
+        Self::from_private_hex(content.trim())
+    }
+
+    /// Load a signing key from a reader (e.g. stdin).
+    pub fn from_reader<R: std::io::Read>(mut r: R) -> Result<Self, SigError> {
+        let mut content = String::new();
+        r.read_to_string(&mut content)
+            .map_err(|_| SigError::Hex(hex::FromHexError::InvalidStringLength))?;
+        Self::from_private_hex(content.trim())
+    }
+
     /// Sign a manifest, returning the signature as hex.
     pub fn sign(&self, manifest: &PluginManifest) -> String {
         let sig = self.signing.sign(&manifest.signing_bytes());
@@ -93,6 +117,7 @@ mod tests {
             entrypoint: "run".into(),
             api_version: API_VERSION,
             permissions: vec![Permission::Scan],
+            targets: std::collections::BTreeMap::new(),
         }
     }
 

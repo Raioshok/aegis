@@ -5,6 +5,7 @@ resolver = "2"
 exclude = ["app"]
 members = [
     "crates/aegis-core",
+    "crates/aegis-platform",
     "crates/aegis-engine",
     "crates/aegis-storage",
     "crates/aegis-quarantine",
@@ -17,6 +18,23 @@ members = [
     "crates/aegis-ipc",
     "crates/aegis-daemon",
     "crates/aegis-cli",
+    "crates/aegis-android",
+]
+default-members = [
+    "crates/aegis-core",
+    "crates/aegis-platform",
+    "crates/aegis-engine",
+    "crates/aegis-storage",
+    "crates/aegis-quarantine",
+    "crates/aegis-behavior",
+    "crates/aegis-firewall",
+    "crates/aegis-network",
+    "crates/aegis-plugin",
+    "crates/aegis-optimize",
+    "crates/aegis-ipc",
+    "crates/aegis-daemon",
+    "crates/aegis-cli",
+    "crates/aegis-android",
 ]
 
 [workspace.package]
@@ -52,8 +70,10 @@ md-5 = "0.10"
 yara-x = "1"
 regex = "1"
 infer = "0.15"
+goblin = "0.9"
 # crypto (quarantine at rest)
 aes-gcm = "0.10"
+chacha20poly1305 = "0.10"
 rand = "0.8"
 zeroize = "1"
 # storage
@@ -68,6 +88,7 @@ nix = { version = "0.31", features = ["fanotify", "fs"] }
 sd-notify = "0.5"
 # internal crates
 aegis-core = { path = "crates/aegis-core" }
+aegis-platform = { path = "crates/aegis-platform" }
 aegis-engine = { path = "crates/aegis-engine" }
 aegis-storage = { path = "crates/aegis-storage" }
 aegis-quarantine = { path = "crates/aegis-quarantine" }

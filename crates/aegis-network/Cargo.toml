@@ -8,6 +8,7 @@ description = "Aegis network intrusion detection (connection & DNS analysis, thr
 
 [dependencies]
 aegis-core.workspace = true
+aegis-platform.workspace = true
 aegis-firewall.workspace = true
 aegis-engine.workspace = true
 serde.workspace = true

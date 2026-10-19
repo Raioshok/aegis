@@ -14,12 +14,14 @@
 #![forbid(unsafe_code)]
 
 mod daemon;
+pub mod gateway;
 pub mod realtime;
 mod scheduler;
 mod server;
 mod state;
 
 pub use daemon::run;
+pub use gateway::{GatewayServer, GatewayState, TelemetryReport, TrainingStats};
 pub use state::DaemonState;
 
 /// Initialise tracing for the daemon (idempotent-ish; call once at startup).

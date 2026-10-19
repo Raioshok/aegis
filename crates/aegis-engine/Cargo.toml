@@ -19,6 +19,11 @@ yara-x.workspace = true
 regex.workspace = true
 infer.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+memmap2.workspace = true
+goblin.workspace = true
+hex = "0.4"
+aegis-platform.workspace = true
 
 [dev-dependencies]
 criterion = "0.5"

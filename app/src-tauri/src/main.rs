@@ -25,6 +25,22 @@ fn main() {
             commands::network_scan,
             commands::plugins_list,
             commands::optimize_scan,
+            commands::toggle_autostart,
+            commands::is_autostart_active,
+            commands::list_processes,
+            commands::kill_process,
+            commands::inspect_process_memory,
+            commands::security_audit,
+            commands::sync_threat_feeds,
+            commands::deploy_ransomware_honeypot,
+            commands::get_protection_config,
+            commands::set_protection_config,
+            commands::get_game_mode_status,
+            commands::toggle_game_mode,
+            commands::get_scan_progress,
+            commands::get_smart_scan_target,
+            commands::scan_android_package,
+            commands::get_gateway_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Aegis");

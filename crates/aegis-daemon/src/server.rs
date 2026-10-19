@@ -7,21 +7,24 @@ use aegis_ipc::protocol::*;
 use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use tokio::net::{UnixListener, UnixStream};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Notify;
 
+#[cfg(unix)]
+use tokio::net::{UnixListener, UnixStream};
+#[cfg(windows)]
+use tokio::net::windows::named_pipe::ServerOptions;
+
+#[cfg(unix)]
 /// Bind the control socket, removing any stale socket file first.
 pub fn bind(socket: &Path) -> std::io::Result<UnixListener> {
     if socket.exists() {
-        // A previous run may have left a stale socket; clean it up.
         let _ = std::fs::remove_file(socket);
     }
     if let Some(parent) = socket.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let listener = UnixListener::bind(socket)?;
-    // Restrict the socket to the owner.
-    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600));
@@ -29,6 +32,7 @@ pub fn bind(socket: &Path) -> std::io::Result<UnixListener> {
     Ok(listener)
 }
 
+#[cfg(unix)]
 /// Accept connections until `shutdown` is notified.
 pub async fn serve(listener: UnixListener, state: Arc<DaemonState>, shutdown: Arc<Notify>) {
     loop {
@@ -55,8 +59,50 @@ pub async fn serve(listener: UnixListener, state: Arc<DaemonState>, shutdown: Ar
     }
 }
 
-async fn handle_conn(
-    mut stream: UnixStream,
+#[cfg(windows)]
+pub fn bind_windows(_socket: &Path) -> std::io::Result<String> {
+    Ok(r"\\.\pipe\aegisd".to_string())
+}
+
+#[cfg(windows)]
+pub async fn serve_windows(pipe_name: String, state: Arc<DaemonState>, shutdown: Arc<Notify>) {
+    tracing::info!(pipe = %pipe_name, "listening on Windows named pipe");
+    let mut first = true;
+    loop {
+        let server = match ServerOptions::new().first_pipe_instance(first).create(&pipe_name) {
+            Ok(s) => {
+                first = false;
+                s
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "failed to create named pipe instance");
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                continue;
+            }
+        };
+
+        tokio::select! {
+            _ = shutdown.notified() => {
+                tracing::info!("IPC server shutting down");
+                break;
+            }
+            res = server.connect() => {
+                if res.is_ok() {
+                    let state = state.clone();
+                    let shutdown = shutdown.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = handle_conn(server, state, shutdown).await {
+                            tracing::debug!(error = %e, "named pipe connection ended");
+                        }
+                    });
+                }
+            }
+        }
+    }
+}
+
+async fn handle_conn<S: AsyncRead + AsyncWrite + Unpin>(
+    mut stream: S,
     state: Arc<DaemonState>,
     shutdown: Arc<Notify>,
 ) -> Result<(), codec::CodecError> {
@@ -235,7 +281,7 @@ mod tests {
     #[tokio::test]
     async fn ipc_ping_status_and_scan_over_real_socket() {
         let tmp = tempfile::tempdir().unwrap();
-        let socket = tmp.path().join("aegisd.sock");
+        let _socket = tmp.path().join("aegisd.sock");
 
         // A malicious file the daemon should flag when asked to scan it.
         let victim = tmp.path().join("evil.sh");
@@ -247,11 +293,22 @@ mod tests {
 
         let db = Arc::new(Database::open_in_memory().unwrap());
         let state = DaemonState::new(Config::default(), Whitelist::default(), db);
-        let listener = bind(&socket).unwrap();
         let shutdown = Arc::new(Notify::new());
-        let server = tokio::spawn(serve(listener, state, shutdown.clone()));
 
-        let client = Client::with_socket(&socket);
+        #[cfg(unix)]
+        let (server, client) = {
+            let listener = bind(&socket).unwrap();
+            let srv = tokio::spawn(serve(listener, state, shutdown.clone()));
+            let cl = Client::with_socket(&socket);
+            (srv, cl)
+        };
+        #[cfg(windows)]
+        let (server, client) = {
+            let pipe_name = format!(r"\\.\pipe\aegis-test-{}", std::process::id());
+            let srv = tokio::spawn(serve_windows(pipe_name.clone(), state, shutdown.clone()));
+            let cl = Client::with_socket(Path::new(&pipe_name));
+            (srv, cl)
+        };
 
         // Ping → Pong
         assert!(client.is_running().await);

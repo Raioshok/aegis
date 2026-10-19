@@ -19,7 +19,11 @@ pub mod whitelist;
 pub use config::{Config, EngineToggles, RansomwareSettings, RealtimeConfig, ScheduleConfig};
 pub use error::{AegisError, Result};
 pub use event::{Event, EventBus};
-pub use model::{Detection, FileVerdict, ScanStats, Severity, ThreatClass};
+pub use model::{
+    AccessEvent, AccessEventType, BlockSets, Connection, Detection, FileVerdict, GateVerdict,
+    MapRegion, ProcessEvent, ProcessEventKind, SandboxPolicy, ScanStats, Severity, ThreatClass,
+    VerdictLevel,
+};
 pub use whitelist::{Whitelist, WhitelistRule};
 
 /// Current epoch seconds, for timestamping rules and records.

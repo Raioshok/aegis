@@ -3,7 +3,11 @@
 use crate::codec::{self, CodecError};
 use crate::protocol::{Request, Response};
 use std::path::{Path, PathBuf};
+
+#[cfg(unix)]
 use tokio::net::UnixStream;
+#[cfg(windows)]
+use tokio::net::windows::named_pipe::ClientOptions;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -42,6 +46,7 @@ impl Client {
 
     /// Send one request and await the daemon's response.
     pub async fn request(&self, req: &Request) -> Result<Response, ClientError> {
+        #[cfg(unix)]
         let mut stream =
             UnixStream::connect(&self.socket)
                 .await
@@ -49,6 +54,33 @@ impl Client {
                     path: self.socket.clone(),
                     source,
                 })?;
+
+        #[cfg(windows)]
+        let pipe_name = if self.socket.to_string_lossy().starts_with(r"\\.\pipe\") {
+            self.socket.to_string_lossy().into_owned()
+        } else {
+            r"\\.\pipe\aegisd".to_string()
+        };
+        #[cfg(windows)]
+        let mut stream = {
+            let mut attempts = 0;
+            loop {
+                match ClientOptions::new().open(&pipe_name) {
+                    Ok(s) => break s,
+                    Err(e) => {
+                        attempts += 1;
+                        if attempts >= 25 {
+                            return Err(ClientError::Connect {
+                                path: PathBuf::from(&pipe_name),
+                                source: e,
+                            });
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+                    }
+                }
+            }
+        };
+
         codec::write_frame(&mut stream, req).await?;
         let resp: Response = codec::read_frame(&mut stream).await?;
         Ok(resp)

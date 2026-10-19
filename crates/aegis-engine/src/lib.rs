@@ -9,24 +9,52 @@
 //! * [`YaraEngine`] — YARA rules via pure-Rust `yara-x`.
 //! * [`HeuristicEngine`] — entropy + behavioural byte-patterns.
 
-#![forbid(unsafe_code)]
-
+pub mod clamd_engine;
 pub mod engine;
 pub mod hash_engine;
 pub mod hashing;
 pub mod heuristic_engine;
 pub mod orchestrator;
+pub mod updater;
 pub mod yara_engine;
 
+pub use clamd_engine::ClamdEngine;
 pub use engine::{Engine, FileContext};
 pub use hash_engine::HashEngine;
 pub use hashing::{digest_file, sha256_hex, Digests};
 pub use heuristic_engine::{shannon_entropy, HeuristicEngine};
 pub use orchestrator::Scanner;
+pub use updater::{FeedData, FeedManager};
 pub use yara_engine::YaraEngine;
 
 /// The baseline YARA rules bundled into the binary (see `rules/aegis_base.yar`).
 pub const BUNDLED_YARA: &str = include_str!("../../../rules/aegis_base.yar");
+
+/// Scan an in-memory script/macro buffer received from the Windows AMSI provider
+/// or an in-memory script evaluator. Returns the most severe detection if a threat is matched.
+pub fn scan_amsi_buffer(
+    content_name: &str,
+    buffer: &[u8],
+    engines: &[Box<dyn Engine>],
+) -> Option<aegis_core::Detection> {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(buffer);
+    let sha256 = hex::encode(hasher.finalize());
+
+    let ctx = FileContext {
+        path: std::path::Path::new(content_name),
+        data: buffer,
+        size: buffer.len() as u64,
+        sha256: &sha256,
+    };
+
+    let mut detections = Vec::new();
+    for engine in engines {
+        detections.extend(engine.scan(&ctx));
+    }
+    detections.into_iter().max_by_key(|d| d.severity)
+}
 
 /// Like [`default_engines`], but returns a shareable `Arc` for the daemon to
 /// build the engine set once and reuse across every scan and every real-time
@@ -47,7 +75,13 @@ pub fn default_engines(
     let mut engines: Vec<Box<dyn Engine>> = Vec::new();
 
     if config.engines.hash {
-        engines.push(Box::new(HashEngine::with_builtin()));
+        let threat_intel_file = aegis_core::paths::threat_intel_dir().join("hashes.txt");
+        let hash_engine = if threat_intel_file.exists() {
+            HashEngine::from_file(&threat_intel_file)
+        } else {
+            HashEngine::with_builtin()
+        };
+        engines.push(Box::new(hash_engine));
     }
     if config.engines.yara {
         // Compile bundled rules first, then any user rules directory.

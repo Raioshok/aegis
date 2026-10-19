@@ -112,12 +112,62 @@ pub fn evaluate(dir: &Path, trust: &TrustStore) -> DiscoveredPlugin {
         };
     }
 
+    if let Err(e) = manifest.validate_entrypoint() {
+        return DiscoveredPlugin {
+            dir: dir.to_path_buf(),
+            manifest: Some(manifest),
+            status: PluginStatus::Invalid(format!("invalid entrypoint: {e}")),
+        };
+    }
+
     let sig = std::fs::read_to_string(&sig_path).unwrap_or_default();
-    let status = if !sig.trim().is_empty() && trust.verifies(&manifest, sig.trim()) {
+    let mut status = if !sig.trim().is_empty() && trust.verifies(&manifest, sig.trim()) {
         PluginStatus::Trusted
     } else {
         PluginStatus::Untrusted
     };
+
+    // If trusted, verify all target hashes (TUF-style integrity check)
+    if status == PluginStatus::Trusted && !manifest.targets.is_empty() {
+        use sha2::{Digest, Sha256};
+        for (rel, target) in &manifest.targets {
+            let target_path = dir.join(rel);
+            let meta = match std::fs::symlink_metadata(&target_path) {
+                Ok(m) => m,
+                Err(e) => {
+                    status = PluginStatus::Invalid(format!("missing target file {rel}: {e}"));
+                    break;
+                }
+            };
+            if meta.file_type().is_symlink() {
+                status = PluginStatus::Invalid(format!("target file {rel} is a forbidden symlink"));
+                break;
+            }
+            if meta.len() != target.size {
+                status = PluginStatus::Invalid(format!(
+                    "target file {rel} size mismatch (expected {}, got {})",
+                    target.size,
+                    meta.len()
+                ));
+                break;
+            }
+            let bytes = match std::fs::read(&target_path) {
+                Ok(b) => b,
+                Err(e) => {
+                    status = PluginStatus::Invalid(format!("read target file {rel}: {e}"));
+                    break;
+                }
+            };
+            let digest = hex::encode(Sha256::digest(&bytes));
+            if !digest.eq_ignore_ascii_case(&target.sha256) {
+                status = PluginStatus::Invalid(format!(
+                    "target file {rel} hash mismatch (expected {}, got {})",
+                    target.sha256, digest
+                ));
+                break;
+            }
+        }
+    }
 
     DiscoveredPlugin {
         dir: dir.to_path_buf(),
@@ -164,6 +214,7 @@ mod tests {
             entrypoint: "run".into(),
             api_version: API_VERSION,
             permissions: vec![Permission::Scan],
+            targets: std::collections::BTreeMap::new(),
         }
     }
 

@@ -1,6 +1,14 @@
 //! Plugin manifest and permission model.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+/// Target file in a TUF-style plugin manifest.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TargetFile {
+    pub size: u64,
+    pub sha256: String,
+}
 
 /// Capabilities a plugin may request. Aegis enforces least privilege: a plugin
 /// only receives the permissions its manifest declares *and* the host grants.
@@ -34,6 +42,9 @@ pub struct PluginManifest {
     /// Permissions the plugin requests.
     #[serde(default)]
     pub permissions: Vec<Permission>,
+    /// TUF-style targets manifest: relative file path -> size and sha256.
+    #[serde(default)]
+    pub targets: BTreeMap<String, TargetFile>,
 }
 
 /// The SDK API version this build of Aegis implements.
@@ -42,8 +53,6 @@ pub const API_VERSION: u32 = 1;
 impl PluginManifest {
     /// Canonical bytes that are signed/verified — a stable JSON serialization.
     pub fn signing_bytes(&self) -> Vec<u8> {
-        // serde_json with sorted keys would be ideal; the struct field order is
-        // stable, so to_vec is deterministic for a given serde_json version.
         serde_json::to_vec(self).expect("manifest serializes")
     }
 
@@ -53,6 +62,26 @@ impl PluginManifest {
 
     pub fn api_compatible(&self) -> bool {
         self.api_version == API_VERSION
+    }
+
+    /// Validate entrypoint does not escape plugin directory and is safe.
+    pub fn validate_entrypoint(&self) -> Result<(), &'static str> {
+        let entry = &self.entrypoint;
+        if entry.is_empty() {
+            return Err("entrypoint cannot be empty");
+        }
+        if entry.starts_with('/') || entry.starts_with('\\') || entry.contains(":") {
+            return Err("entrypoint must be relative");
+        }
+        for part in std::path::Path::new(entry).components() {
+            if let std::path::Component::ParentDir = part {
+                return Err("entrypoint cannot contain '..'");
+            }
+        }
+        if !self.targets.is_empty() && !self.targets.contains_key(entry) {
+            return Err("entrypoint not listed in targets manifest");
+        }
+        Ok(())
     }
 }
 
@@ -69,6 +98,7 @@ mod tests {
             entrypoint: "run.sh".into(),
             api_version: API_VERSION,
             permissions: vec![Permission::Scan, Permission::ReadFiles],
+            targets: BTreeMap::new(),
         }
     }
 

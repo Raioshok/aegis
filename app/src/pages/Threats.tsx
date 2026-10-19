@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
+import { Bug, History, ShieldCheck, AlertCircle } from "lucide-react";
 import { api, fmtTime, severityColor, type HistoryRow, type ThreatRow } from "@/lib/api";
 import { Badge, Card, SectionTitle } from "@/components/ui";
 
 export default function Threats() {
   const [threats, setThreats] = useState<ThreatRow[]>([]);
   const [history, setHistory] = useState<HistoryRow[]>([]);
+  const [activeTab, setActiveTab] = useState<"threats" | "history">("threats");
 
   useEffect(() => {
     api.threats(200).then(setThreats).catch(() => {});
@@ -12,72 +14,123 @@ export default function Threats() {
   }, []);
 
   return (
-    <div>
-      <SectionTitle title="Threats & History" subtitle="Everything Aegis has detected." />
+    <div className="space-y-6 max-w-6xl">
+      <SectionTitle
+        title="Threat Events & History"
+        subtitle="Historical audit log of all identified threat events, real-time file interceptions, and completed scans."
+      />
 
-      <Card className="mb-5">
-        <h2 className="mb-3 text-base font-semibold">Detected threats</h2>
-        {threats.length === 0 ? (
-          <p className="text-sm text-muted">No threats recorded.</p>
-        ) : (
-          <div className="max-h-[340px] overflow-y-auto">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-black/40 text-left text-muted backdrop-blur">
-                <tr>
-                  <th className="px-3 py-2 font-medium">Threat</th>
-                  <th className="px-3 py-2 font-medium">Path</th>
-                  <th className="px-3 py-2 font-medium">Engine</th>
-                  <th className="px-3 py-2 font-medium">Severity</th>
-                </tr>
-              </thead>
-              <tbody>
-                {threats.map((t, i) => (
-                  <tr key={i} className="border-t border-border">
-                    <td className="px-3 py-2">{t.names}</td>
-                    <td className="max-w-[260px] truncate px-3 py-2 text-muted" title={t.path}>
-                      {t.path}
-                    </td>
-                    <td className="px-3 py-2 text-muted">{t.engines}</td>
-                    <td className="px-3 py-2">
-                      <span className={severityColor(t.severity)}>{t.severity_label}</span>
-                    </td>
+      {/* Clean Tabs */}
+      <div className="flex items-center gap-2 border-b border-[#EAEFF5] pb-3">
+        <button
+          onClick={() => setActiveTab("threats")}
+          className={`px-4 py-2 text-xs font-bold rounded-xl transition-all duration-150 ${
+            activeTab === "threats"
+              ? "bg-[#1E293B] text-white shadow-sm"
+              : "text-[#64748B] hover:text-[#1E293B] hover:bg-[#F1F5F9]"
+          }`}
+        >
+          Threat Log ({threats.length})
+        </button>
+        <button
+          onClick={() => setActiveTab("history")}
+          className={`px-4 py-2 text-xs font-bold rounded-xl transition-all duration-150 ${
+            activeTab === "history"
+              ? "bg-[#1E293B] text-white shadow-sm"
+              : "text-[#64748B] hover:text-[#1E293B] hover:bg-[#F1F5F9]"
+          }`}
+        >
+          Scan Sessions ({history.length})
+        </button>
+      </div>
+
+      {activeTab === "threats" && (
+        <Card className="p-0 overflow-hidden">
+          <div className="px-6 py-4 border-b border-[#EAEFF5] flex items-center justify-between bg-white">
+            <h2 className="text-sm font-bold text-[#1E293B]">Security Event Log</h2>
+            <Badge color={threats.length > 0 ? "warn" : "ok"}>
+              {threats.length === 0 ? "Protected" : `${threats.length} Events`}
+            </Badge>
+          </div>
+
+          {threats.length === 0 ? (
+            <div className="p-16 text-center space-y-2">
+              <ShieldCheck size={36} className="text-[#10B981] mx-auto opacity-80" />
+              <div className="text-sm font-bold text-[#1E293B]">Zero Threats Logged</div>
+              <p className="text-xs text-[#64748B] max-w-sm mx-auto">
+                No active threats or malicious binaries have been flagged on this machine.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs font-mono">
+                <thead className="bg-[#F8FAFC] text-[#64748B] border-b border-[#EAEFF5]">
+                  <tr>
+                    <th className="px-6 py-3 font-semibold">Classification</th>
+                    <th className="px-6 py-3 font-semibold">Object Location</th>
+                    <th className="px-6 py-3 font-semibold">Engine</th>
+                    <th className="px-6 py-3 font-semibold">Severity</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+                </thead>
+                <tbody className="divide-y divide-[#EAEFF5]">
+                  {threats.map((t, i) => (
+                    <tr key={i} className="hover:bg-[#F8FAFC] transition-colors">
+                      <td className="px-6 py-3.5 font-sans font-bold text-[#DC2626] flex items-center gap-2">
+                        <AlertCircle size={15} className="text-[#FF7222] shrink-0" />
+                        {t.names}
+                      </td>
+                      <td className="max-w-[340px] truncate px-6 py-3.5 text-[#475569]" title={t.path}>
+                        {t.path}
+                      </td>
+                      <td className="px-6 py-3.5 text-[#64748B]">{t.engines}</td>
+                      <td className="px-6 py-3.5">
+                        <Badge color={t.severity >= 3 ? "danger" : "warn"}>
+                          {t.severity_label}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
 
-      <Card>
-        <h2 className="mb-3 text-base font-semibold">Scan history</h2>
-        {history.length === 0 ? (
-          <p className="text-sm text-muted">No scans yet.</p>
-        ) : (
-          <div className="space-y-1">
-            {history.map((h, i) => (
-              <div
-                key={i}
-                className="flex items-center justify-between rounded-lg px-3 py-2 text-sm hover:bg-white/5"
-              >
-                <div className="flex items-center gap-3">
-                  <Badge color={h.kind === "realtime" ? "accent" : "muted"}>{h.kind}</Badge>
-                  <span className="max-w-[320px] truncate text-muted" title={h.target}>
-                    {h.target}
-                  </span>
-                </div>
-                <div className="flex items-center gap-4 text-muted">
-                  <span>{h.files} files</span>
-                  <span className={h.threats > 0 ? "text-danger" : "text-ok"}>
-                    {h.threats} threats
-                  </span>
-                  <span>{fmtTime(h.finished)}</span>
-                </div>
-              </div>
-            ))}
+      {activeTab === "history" && (
+        <Card className="p-0 overflow-hidden">
+          <div className="px-6 py-4 border-b border-[#EAEFF5] flex items-center justify-between bg-white">
+            <h2 className="text-sm font-bold text-[#1E293B]">Completed Scan Sessions</h2>
+            <Badge color="neutral">{history.length} Sessions</Badge>
           </div>
-        )}
-      </Card>
+
+          {history.length === 0 ? (
+            <div className="p-12 text-center text-xs text-[#64748B]">
+              No historical scan sessions recorded yet.
+            </div>
+          ) : (
+            <div className="divide-y divide-[#EAEFF5] text-xs font-mono">
+              {history.map((h, i) => (
+                <div key={i} className="px-6 py-3.5 flex items-center justify-between hover:bg-[#F8FAFC] transition-colors">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Badge color={h.kind === "realtime" ? "blue" : "ok"}>{h.kind}</Badge>
+                    <span className="text-[#1E293B] font-medium truncate max-w-md" title={h.target}>
+                      {h.target}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-6 text-[#64748B] shrink-0">
+                    <span className="tab-nums">{h.files} files</span>
+                    <span className={h.threats > 0 ? "text-[#DC2626] font-bold tab-nums" : "text-[#059669] tab-nums"}>
+                      {h.threats} threats
+                    </span>
+                    <span className="text-[#94A3B8]">{fmtTime(h.finished)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
     </div>
   );
 }

@@ -204,57 +204,249 @@ impl Engine for HeuristicEngine {
         let head = &data[..data.len().min(512)];
         let is_elf = head.starts_with(b"\x7fELF");
         let is_pe = head.starts_with(b"MZ");
-        let is_binary = head.contains(&0u8);
+        let is_executable = is_elf || is_pe;
 
-        // 1. Packer markers.
-        let scan_head = &data[..data.len().min(65536)];
-        for (marker, reason) in PACKER_MARKERS {
-            if find_bytes(scan_head, marker) {
-                out.push(Detection::new(
-                    "Heuristic",
-                    "Packed.Executable",
-                    Severity::Medium,
-                    ThreatClass::PackedBinary,
-                    *reason,
-                ));
-                break;
+        // 1. Packer markers — run ONLY on executables (never on text or data)
+        if is_executable {
+            let scan_head = &data[..data.len().min(65536)];
+            for (marker, reason) in PACKER_MARKERS {
+                if find_bytes(scan_head, marker) {
+                    out.push(Detection::with_scores(
+                        "Heuristic",
+                        "Packed.Executable",
+                        Severity::Medium,
+                        ThreatClass::PackedBinary,
+                        *reason,
+                        0.7,
+                        0.7,
+                    ));
+                    break;
+                }
             }
         }
 
-        // 2. Entropy on executables.
-        if is_elf || is_pe {
+        // 2. Structural binary parsing with goblin (ELF & PE)
+        if is_elf {
+            if let Ok(elf) = goblin::elf::Elf::parse(data) {
+                if elf.section_headers.is_empty() && !elf.program_headers.is_empty() {
+                    out.push(Detection::with_scores(
+                        "Heuristic",
+                        "ELF.Sectionless",
+                        Severity::Low,
+                        ThreatClass::Heuristic,
+                        "ELF binary has completely stripped section header table (anti-reverse engineering evasion)",
+                        0.5,
+                        0.6,
+                    ));
+                }
+                for sh in &elf.section_headers {
+                    let is_w = (sh.sh_flags & goblin::elf::section_header::SHF_WRITE as u64) != 0;
+                    let is_x = (sh.sh_flags & goblin::elf::section_header::SHF_EXECINSTR as u64) != 0;
+                    if is_w && is_x && sh.sh_size > 0 {
+                        out.push(Detection::with_scores(
+                            "Heuristic",
+                            "ELF.RWXSection",
+                            Severity::Medium,
+                            ThreatClass::Heuristic,
+                            "ELF contains an executable and writable (W+X) section (self-modifying code / packer)",
+                            0.75,
+                            0.8,
+                        ));
+                        break;
+                    }
+                    if let Some(name) = elf.shdr_strtab.get_at(sh.sh_name) {
+                        if name.starts_with(".upx") || name.starts_with("UPX") {
+                            out.push(Detection::with_scores(
+                                "Heuristic",
+                                "Packed.UPXSection",
+                                Severity::Medium,
+                                ThreatClass::PackedBinary,
+                                format!("ELF has UPX packer section '{name}'"),
+                                0.8,
+                                0.85,
+                            ));
+                            break;
+                        }
+                    }
+                }
+            }
+        } else if is_pe {
+            if let Ok(pe) = goblin::pe::PE::parse(data) {
+                let mut max_raw_end = 0usize;
+                let mut entry_in_exec_section = false;
+
+                for s in &pe.sections {
+                    // Characteristics: IMAGE_SCN_MEM_EXECUTE (0x20000000) | IMAGE_SCN_MEM_WRITE (0x80000000)
+                    let is_x = (s.characteristics & 0x2000_0000) != 0;
+                    let is_w = (s.characteristics & 0x8000_0000) != 0;
+                    let raw_end = (s.pointer_to_raw_data + s.size_of_raw_data) as usize;
+                    if raw_end > max_raw_end {
+                        max_raw_end = raw_end;
+                    }
+
+                    if pe.entry >= s.virtual_address as usize
+                        && pe.entry < (s.virtual_address + s.virtual_size.max(s.size_of_raw_data)) as usize
+                    {
+                        if is_x {
+                            entry_in_exec_section = true;
+                        }
+                    }
+
+                    if is_w && is_x && s.size_of_raw_data > 0 {
+                        out.push(Detection::with_scores(
+                            "Heuristic",
+                            "PE.RWXSection",
+                            Severity::Medium,
+                            ThreatClass::Heuristic,
+                            "PE contains an executable and writable (W+X) section (packer / shellcode injection)",
+                            0.75,
+                            0.8,
+                        ));
+                        break;
+                    }
+                    let name = String::from_utf8_lossy(&s.name);
+                    let trim_name = name.trim_matches('\0').trim();
+                    if trim_name.starts_with("UPX")
+                        || trim_name.starts_with(".themida")
+                        || trim_name.starts_with(".aspack")
+                        || trim_name.starts_with(".vmp")
+                    {
+                        out.push(Detection::with_scores(
+                            "Heuristic",
+                            "Packed.Section",
+                            Severity::Medium,
+                            ThreatClass::PackedBinary,
+                            format!("PE contains packer section '{trim_name}'"),
+                            0.8,
+                            0.85,
+                        ));
+                        break;
+                    }
+                }
+
+                if pe.entry > 0 && !entry_in_exec_section && !pe.sections.is_empty() {
+                    out.push(Detection::with_scores(
+                        "Heuristic",
+                        "PE.AnomalousEntrypoint",
+                        Severity::Medium,
+                        ThreatClass::Heuristic,
+                        format!("PE entry point (RVA 0x{:x}) points outside standard executable sections", pe.entry),
+                        0.7,
+                        0.75,
+                    ));
+                }
+
+                if max_raw_end > 0 && data.len() > max_raw_end + 1024 * 1024 {
+                    let overlay_len = data.len() - max_raw_end;
+                    if overlay_len > data.len() / 3 {
+                        out.push(Detection::with_scores(
+                            "Heuristic",
+                            "PE.SuspiciousOverlay",
+                            Severity::Low,
+                            ThreatClass::Heuristic,
+                            format!("PE contains a massive unmapped overlay ({} bytes, {:.0}% of file size)", overlay_len, (overlay_len as f64 / data.len() as f64) * 100.0),
+                            0.5,
+                            0.6,
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Filename and extension masquerading checks
+        if let Some(filename) = ctx.path.file_name().and_then(|n| n.to_str()) {
+            if filename.contains('\u{202E}') {
+                out.push(Detection::with_scores(
+                    "Heuristic",
+                    "Suspicious.RTLO.Filename",
+                    Severity::Critical,
+                    ThreatClass::Heuristic,
+                    format!("Filename '{filename}' contains Right-to-Left Override Unicode character (U+202E) to disguise file extension"),
+                    0.95,
+                    0.95,
+                ));
+            }
+
+            let lower = filename.to_ascii_lowercase();
+            let suspicious_exec_exts = ["exe", "scr", "pif", "vbs", "js", "hta", "bat", "cmd", "ps1"];
+            let fake_doc_exts = ["pdf", "docx", "doc", "xlsx", "xls", "pptx", "jpg", "jpeg", "png", "zip", "txt", "mp4"];
+            for exec_ext in &suspicious_exec_exts {
+                if lower.ends_with(&format!(".{exec_ext}")) {
+                    for doc_ext in &fake_doc_exts {
+                        if lower.contains(&format!(".{doc_ext}.{exec_ext}")) {
+                            out.push(Detection::with_scores(
+                                "Heuristic",
+                                "Suspicious.DoubleExtension",
+                                Severity::High,
+                                ThreatClass::Heuristic,
+                                format!("Filename '{filename}' uses a deceptive double extension disguise (.{doc_ext}.{exec_ext})"),
+                                0.9,
+                                0.9,
+                            ));
+                            break;
+                        }
+                    }
+                    break;
+                }
+            }
+
+            if lower.ends_with(".lnk") && data.len() < 5 * 1024 * 1024 {
+                let text_lower = String::from_utf8_lossy(data).to_ascii_lowercase();
+                if (text_lower.contains("powershell") || text_lower.contains("cmd.exe") || text_lower.contains("mshta") || text_lower.contains("certutil") || text_lower.contains("curl"))
+                    && (text_lower.contains("http://") || text_lower.contains("https://") || text_lower.contains("-enc") || text_lower.contains("bypass"))
+                {
+                    out.push(Detection::with_scores(
+                        "Heuristic",
+                        "Suspicious.WeaponizedLNK",
+                        Severity::High,
+                        ThreatClass::Heuristic,
+                        "Windows shortcut (.lnk) contains embedded command shell or remote payload execution",
+                        0.85,
+                        0.9,
+                    ));
+                }
+            }
+        }
+
+        // 3. Shannon entropy on executables
+        if is_executable {
             let sample = &data[..data.len().min(1024 * 1024)];
             let ent = shannon_entropy(sample);
             if ent >= self.entropy_threshold {
-                out.push(Detection::new(
+                out.push(Detection::with_scores(
                     "Heuristic",
                     "Suspicious.HighEntropy",
                     Severity::Low,
                     ThreatClass::PackedBinary,
                     format!("Executable entropy {ent:.2} — likely packed/encrypted"),
+                    0.4,
+                    0.4,
                 ));
             }
         }
 
-        // 3. Behavioural byte patterns. Script-intent patterns run on text/
-        //    script content only; a pattern must opt in (`binary_ok`) to be
-        //    evaluated against a compiled ELF/PE, which avoids false positives
-        //    from incidental strings inside system binaries.
-        let is_executable = is_elf || is_pe;
-        let is_texty = !is_binary; // no NUL byte in the header → text/script
-        {
-            let region = &data[..data.len().min(1024 * 1024)];
-            for pat in patterns() {
-                let applicable = is_texty || (is_executable && pat.binary_ok);
-                if applicable && pat.re.is_match(region) {
-                    out.push(Detection::new(
-                        "Heuristic",
-                        pat.threat,
-                        pat.severity,
-                        pat.class,
-                        pat.reason,
-                    ));
-                }
+        // 4. Behavioural byte patterns.
+        // Script patterns run on scripts/interpreters; compiled executables only run patterns that explicitly opted in (`binary_ok`).
+        // Documentation, markup, and config files (.md, .txt, .json, .yaml) are exempted from dropper false positives.
+        let ext = ctx.path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let is_binary = head.contains(&0u8);
+        let is_text = !is_binary;
+        let is_doc = matches!(ext, "md" | "markdown" | "txt" | "rst" | "json" | "yaml" | "yml" | "toml" | "xml" | "html" | "css");
+        let is_script = head.starts_with(b"#!")
+            || matches!(ext, "sh" | "bash" | "zsh" | "py" | "pl" | "rb" | "js" | "ps1" | "bat" | "cmd");
+
+        let region = &data[..data.len().min(1024 * 1024)];
+        for pat in patterns() {
+            let applicable = (is_executable && pat.binary_ok)
+                || (!is_doc && (is_script || (is_text && !is_executable && ext.is_empty())));
+            if applicable && pat.re.is_match(region) {
+                out.push(Detection::new(
+                    "Heuristic",
+                    pat.threat,
+                    pat.severity,
+                    pat.class,
+                    pat.reason,
+                ));
             }
         }
 
@@ -349,5 +541,27 @@ mod tests {
         data.extend_from_slice(b"stratum+tcp://pool.evil:3333\0xmrig\0");
         let d = HeuristicEngine::default().scan(&ctx(&data));
         assert!(d.iter().any(|x| x.threat.contains("CryptoMiner")));
+    }
+
+    #[test]
+    fn detects_double_extension_and_rtlo() {
+        let eng = HeuristicEngine::default();
+        let fc_double = FileContext {
+            path: Path::new("invoice.pdf.exe"),
+            data: b"MZ\x90\x00data",
+            size: 8,
+            sha256: "",
+        };
+        let d_double = eng.scan(&fc_double);
+        assert!(d_double.iter().any(|x| x.threat == "Suspicious.DoubleExtension"));
+
+        let fc_rtlo = FileContext {
+            path: Path::new("invoice\u{202E}fdp.exe"),
+            data: b"MZ\x90\x00data",
+            size: 8,
+            sha256: "",
+        };
+        let d_rtlo = eng.scan(&fc_rtlo);
+        assert!(d_rtlo.iter().any(|x| x.threat == "Suspicious.RTLO.Filename"));
     }
 }

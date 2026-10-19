@@ -20,6 +20,7 @@ pub struct QuarantineRecord {
     pub quarantined_at: i64,
     pub stored_name: String,
     pub nonce: Vec<u8>,
+    pub status: String,
 }
 
 pub struct QuarantineIndex<'a> {
@@ -35,8 +36,8 @@ impl<'a> QuarantineIndex<'a> {
         let conn = self.conn.lock().expect("db poisoned");
         conn.execute(
             "INSERT OR REPLACE INTO quarantine
-             (sha256,original_path,threat,engine,severity,size,quarantined_at,stored_name,nonce)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+             (sha256,original_path,threat,engine,severity,size,quarantined_at,stored_name,nonce,status)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
             params![
                 rec.sha256,
                 rec.original_path,
@@ -47,7 +48,18 @@ impl<'a> QuarantineIndex<'a> {
                 rec.quarantined_at,
                 rec.stored_name,
                 rec.nonce,
+                rec.status,
             ],
+        )
+        .map_err(|e| AegisError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn mark_status(&self, sha256: &str, status: &str) -> Result<()> {
+        let conn = self.conn.lock().expect("db poisoned");
+        conn.execute(
+            "UPDATE quarantine SET status=?2 WHERE sha256=?1",
+            params![sha256, status],
         )
         .map_err(|e| AegisError::Storage(e.to_string()))?;
         Ok(())
@@ -56,7 +68,7 @@ impl<'a> QuarantineIndex<'a> {
     pub fn get(&self, sha256: &str) -> Result<Option<QuarantineRecord>> {
         let conn = self.conn.lock().expect("db poisoned");
         let mut stmt = conn
-            .prepare("SELECT sha256,original_path,threat,engine,severity,size,quarantined_at,stored_name,nonce FROM quarantine WHERE sha256=?1")
+            .prepare("SELECT sha256,original_path,threat,engine,severity,size,quarantined_at,stored_name,nonce,status FROM quarantine WHERE sha256=?1")
             .map_err(|e| AegisError::Storage(e.to_string()))?;
         let mut rows = stmt
             .query_map([sha256], row_to_record)
@@ -70,7 +82,7 @@ impl<'a> QuarantineIndex<'a> {
     pub fn all(&self) -> Result<Vec<QuarantineRecord>> {
         let conn = self.conn.lock().expect("db poisoned");
         let mut stmt = conn
-            .prepare("SELECT sha256,original_path,threat,engine,severity,size,quarantined_at,stored_name,nonce FROM quarantine ORDER BY quarantined_at DESC")
+            .prepare("SELECT sha256,original_path,threat,engine,severity,size,quarantined_at,stored_name,nonce,status FROM quarantine ORDER BY quarantined_at DESC")
             .map_err(|e| AegisError::Storage(e.to_string()))?;
         let rows = stmt
             .query_map([], row_to_record)
@@ -101,6 +113,7 @@ fn row_to_record(r: &rusqlite::Row<'_>) -> rusqlite::Result<QuarantineRecord> {
         quarantined_at: r.get(6)?,
         stored_name: r.get(7)?,
         nonce: r.get(8)?,
+        status: r.get(9).unwrap_or_else(|_| "quarantined".into()),
     })
 }
 
@@ -123,6 +136,7 @@ mod tests {
             quarantined_at: 999,
             stored_name: "abc.quar".into(),
             nonce: vec![1, 2, 3, 4],
+            status: "quarantined".into(),
         };
         idx.insert(&rec).unwrap();
         assert!(idx.get("abc").unwrap().is_some());

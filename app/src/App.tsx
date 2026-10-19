@@ -1,105 +1,210 @@
-import { useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { useState, useEffect } from "react";
 import {
-  Activity,
-  ShieldCheck,
-  ScanLine,
+  LayoutGrid,
+  Shield,
   Bug,
+  Monitor,
   ListChecks,
   Lock,
   Radar,
-  Network as NetIcon,
+  Network,
   Rocket,
+  Sliders,
+  ShieldCheck,
+  User,
+  MoreVertical,
+  Sun,
+  Moon,
+  Smartphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
+import { useTheme } from "@/lib/theme";
 import Dashboard from "@/pages/Dashboard";
 import Scan from "@/pages/Scan";
 import Threats from "@/pages/Threats";
 import Whitelist from "@/pages/Whitelist";
 import Quarantine from "@/pages/Quarantine";
 import Behavior from "@/pages/Behavior";
-import Network from "@/pages/Network";
+import NetworkPage from "@/pages/Network";
 import Optimize from "@/pages/Optimize";
+import Processes from "@/pages/Processes";
+import Settings from "@/pages/Settings";
+import AndroidScanner from "@/pages/AndroidScanner";
 
-type PageId =
+export type PageId =
   | "dashboard"
   | "scan"
+  | "android"
   | "threats"
+  | "processes"
   | "whitelist"
   | "quarantine"
   | "behavior"
   | "network"
-  | "optimize";
+  | "optimize"
+  | "settings";
 
-const NAV: { id: PageId; label: string; icon: JSX.Element }[] = [
-  { id: "dashboard", label: "Dashboard", icon: <Activity size={18} /> },
-  { id: "scan", label: "Scan", icon: <ScanLine size={18} /> },
-  { id: "threats", label: "Threats", icon: <Bug size={18} /> },
-  { id: "whitelist", label: "Whitelist", icon: <ListChecks size={18} /> },
-  { id: "quarantine", label: "Quarantine", icon: <Lock size={18} /> },
-  { id: "behavior", label: "Behavior", icon: <Radar size={18} /> },
-  { id: "network", label: "Network", icon: <NetIcon size={18} /> },
-  { id: "optimize", label: "Optimize", icon: <Rocket size={18} /> },
-];
+interface NavItem {
+  id: PageId;
+  label: string;
+  icon: JSX.Element;
+  badge?: number | string;
+}
 
 export default function App() {
   const [page, setPage] = useState<PageId>("dashboard");
+  const [threatCount, setThreatCount] = useState<number>(0);
+  const { theme, toggleTheme } = useTheme();
+
+  useEffect(() => {
+    api.threats(20)
+      .then((t) => setThreatCount(t.length))
+      .catch(() => {});
+  }, [page]);
+
+  const NAV: NavItem[] = [
+    { id: "dashboard", label: "Overview", icon: <LayoutGrid size={18} /> },
+    { id: "scan", label: "Smart Scan", icon: <Shield size={18} /> },
+    { id: "android", label: "Android Antivirus", icon: <Smartphone size={18} /> },
+    {
+      id: "threats",
+      label: "Threat Events",
+      icon: <Bug size={18} />,
+      badge: threatCount > 0 ? threatCount : undefined,
+    },
+    { id: "processes", label: "Process Inspector", icon: <Monitor size={18} /> },
+    { id: "whitelist", label: "Allowlist", icon: <ListChecks size={18} /> },
+    { id: "quarantine", label: "Quarantine Vault", icon: <Lock size={18} /> },
+    { id: "behavior", label: "Behavior Guard", icon: <Radar size={18} /> },
+    { id: "network", label: "Network Firewall", icon: <Network size={18} /> },
+    { id: "optimize", label: "System Tune-Up", icon: <Rocket size={18} /> },
+    { id: "settings", label: "Shields & Settings", icon: <Sliders size={18} /> },
+  ];
 
   return (
-    <div className="flex h-full">
-      {/* Sidebar */}
-      <aside className="flex w-56 flex-col border-r border-border bg-black/20 backdrop-blur-xl">
-        <div className="flex items-center gap-2 px-5 py-5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent shadow-glow">
-            <ShieldCheck size={20} className="text-white" />
-          </div>
-          <div>
-            <div className="text-sm font-bold leading-tight">Aegis</div>
-            <div className="text-[11px] text-muted">Linux AV</div>
-          </div>
-        </div>
-        <nav className="mt-2 flex flex-col gap-1 px-3">
-          {NAV.map((n) => (
+    <div className="flex h-full select-none overflow-hidden bg-[#F6F8FB] dark:bg-[#0C0D12] text-[#1E293B] dark:text-white transition-colors">
+      {/* Sidebar with Dark/Light Support */}
+      <aside className="flex w-64 flex-col bg-white dark:bg-[#10121A] border-r border-[#EAEFF5] dark:border-[#212533] px-4 py-6 justify-between transition-colors">
+        <div>
+          {/* Logo Brand: Minimalist Shield + lowercase aegis */}
+          <div className="flex items-center justify-between px-3 mb-8">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#1E293B] dark:bg-[#FF7222] text-white shadow-sm">
+                <ShieldCheck size={20} strokeWidth={2.2} />
+              </div>
+              <div>
+                <div className="text-xl font-extrabold tracking-tight text-[#1E293B] dark:text-white leading-none">
+                  aegis
+                </div>
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-[#FF7222] mt-1">
+                  Security Suite
+                </div>
+              </div>
+            </div>
+
+            {/* Dark / Light Mode Switch Button in Header */}
             <button
-              key={n.id}
-              onClick={() => setPage(n.id)}
-              className={cn(
-                "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all",
-                page === n.id
-                  ? "bg-accent text-white shadow-glow"
-                  : "text-muted hover:bg-white/5 hover:text-fg",
-              )}
+              onClick={toggleTheme}
+              className="p-2 rounded-xl text-[#64748B] dark:text-[#8491A2] hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B] hover:text-[#1E293B] dark:hover:text-white transition-colors"
+              title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
             >
-              {n.icon}
-              {n.label}
+              {theme === "dark" ? (
+                <Sun size={17} className="text-[#F59E0B]" />
+              ) : (
+                <Moon size={17} className="text-[#64748B]" />
+              )}
             </button>
-          ))}
-        </nav>
-        <div className="mt-auto px-5 py-4 text-[11px] text-muted">
-          v0.1.0 · Milestone 4
+          </div>
+
+          {/* Navigation Menu */}
+          <nav className="flex flex-col gap-1.5">
+            {NAV.map((n) => {
+              const isActive = page === n.id;
+              return (
+                <button
+                  key={n.id}
+                  onClick={() => setPage(n.id)}
+                  className={cn(
+                    "flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-medium transition-all duration-150 active:scale-[0.98]",
+                    isActive
+                      ? "bg-[#F1F5F9] dark:bg-[#1E293B] text-[#1E293B] dark:text-white font-semibold shadow-sm"
+                      : "text-[#64748B] dark:text-[#8491A2] hover:bg-[#F8FAFC] dark:hover:bg-[#191C26] hover:text-[#1E293B] dark:hover:text-white"
+                  )}
+                >
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={cn(
+                        "transition-colors",
+                        isActive ? "text-[#FF7222]" : "text-[#94A3B8] dark:text-[#64748B]"
+                      )}
+                    >
+                      {n.icon}
+                    </span>
+                    <span>{n.label}</span>
+                  </div>
+
+                  {n.badge !== undefined && (
+                    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#FF7222] px-1.5 text-[10px] font-bold text-white shadow-sm">
+                      {n.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+
+        {/* User / Host Status Card + Quick Theme Info */}
+        <div className="space-y-2">
+          <div className="rounded-2xl border border-[#EAEFF5] dark:border-[#212533] bg-[#F8FAFC] dark:bg-[#13151D] p-3 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white dark:bg-[#1E293B] border border-[#EAEFF5] dark:border-[#334155] text-[#64748B] dark:text-[#94A3B8] shadow-sm shrink-0">
+                  <User size={18} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-[#1E293B] dark:text-white truncate">
+                    User Account
+                  </div>
+                  <div className="text-[11px] text-[#059669] dark:text-[#34D399] font-medium truncate flex items-center gap-1">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#10B981]" />
+                    Active Protection
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={toggleTheme}
+                className="text-[#94A3B8] dark:text-[#64748B] hover:text-[#1E293B] dark:hover:text-white p-1 rounded-lg"
+                title="Toggle Theme"
+              >
+                {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+              </button>
+            </div>
+          </div>
         </div>
       </aside>
 
-      {/* Content */}
-      <main className="flex-1 overflow-y-auto p-8">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={page}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2 }}
-          >
-            {page === "dashboard" && <Dashboard onNavigateScan={() => setPage("scan")} />}
-            {page === "scan" && <Scan />}
-            {page === "threats" && <Threats />}
-            {page === "whitelist" && <Whitelist />}
-            {page === "quarantine" && <Quarantine />}
-            {page === "behavior" && <Behavior />}
-            {page === "network" && <Network />}
-            {page === "optimize" && <Optimize />}
-          </motion.div>
-        </AnimatePresence>
+      {/* Main Content Viewport */}
+      <main className="flex-1 overflow-y-auto p-8 bg-[#F6F8FB] dark:bg-[#0C0D12] transition-colors">
+        <div className="max-w-7xl mx-auto">
+          {page === "dashboard" && (
+            <Dashboard
+              onNavigateScan={() => setPage("scan")}
+              onNavigatePage={(p) => setPage(p as PageId)}
+            />
+          )}
+          {page === "scan" && <Scan />}
+          {page === "android" && <AndroidScanner />}
+          {page === "threats" && <Threats />}
+          {page === "processes" && <Processes />}
+          {page === "whitelist" && <Whitelist />}
+          {page === "quarantine" && <Quarantine />}
+          {page === "behavior" && <Behavior />}
+          {page === "network" && <NetworkPage />}
+          {page === "optimize" && <Optimize />}
+          {page === "settings" && <Settings />}
+        </div>
       </main>
     </div>
   );

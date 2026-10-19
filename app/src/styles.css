@@ -4,6 +4,9 @@
 
 @layer base {
   :root {
+    color-scheme: light;
+  }
+  html.dark {
     color-scheme: dark;
   }
   html,
@@ -11,29 +14,52 @@
   #root {
     height: 100%;
     margin: 0;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+  html.light,
+  html.light body,
+  html.light #root {
+    background-color: #F6F8FB;
+    color: #1E293B;
+  }
+  html.dark,
+  html.dark body,
+  html.dark #root {
+    background-color: #0C0D12;
+    color: #FFFFFF;
   }
   body {
-    @apply bg-bg text-fg font-sans antialiased;
-    background-image:
-      radial-gradient(1200px 600px at 80% -10%, rgba(47, 129, 247, 0.12), transparent 60%),
-      radial-gradient(900px 500px at -10% 110%, rgba(63, 185, 80, 0.08), transparent 55%);
-    background-attachment: fixed;
-  }
-  ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-  }
-  ::-webkit-scrollbar-thumb {
-    @apply rounded-full;
-    background: rgba(255, 255, 255, 0.12);
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
   }
 }
 
-@layer components {
-  .glass {
-    @apply border border-border bg-surface backdrop-blur-xl shadow-glass;
-  }
-  .card {
-    @apply glass rounded-2xl;
-  }
+/* Modern soft scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+html.light ::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 9999px;
+}
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+html.dark ::-webkit-scrollbar-thumb {
+  background: #2D3748;
+  border-radius: 9999px;
+}
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #4A5568;
+}
+
+/* Tabular figures for numbers */
+.tab-nums {
+  font-variant-numeric: tabular-nums;
 }

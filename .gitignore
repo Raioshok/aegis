@@ -3,3 +3,22 @@
 Cargo.lock.orig
 *.profraw
 .DS_Store
+
+# Binaries and compiled artifacts
+bin/
+*.exe
+*.dll
+*.pdb
+
+# Web build & dependencies
+node_modules/
+dist/
+app/dist/
+
+# Virtual disks & ISO images
+*.vmdk
+*.vhdx
+*.avhdx
+*.iso
+*.flp
+*.nvram

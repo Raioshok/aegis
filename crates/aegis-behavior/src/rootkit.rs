@@ -15,18 +15,31 @@
 //! The parsing/diff logic is factored into pure functions so it is unit-tested
 //! with synthetic inputs; the live scan wires them to the real filesystem.
 
+#![allow(dead_code)]
+
 use aegis_core::{Detection, Severity, ThreatClass};
 use std::collections::BTreeSet;
 use std::path::Path;
 
-/// Run every rootkit check against the live system.
+/// Run every rootkit / integrity check against the live system.
 pub fn scan() -> Vec<Detection> {
-    let mut out = Vec::new();
-    out.extend(check_hidden_processes());
-    out.extend(check_hidden_modules());
-    out.extend(check_ld_preload());
-    out.extend(check_kernel_taint());
-    out
+    #[cfg(target_os = "linux")]
+    {
+        let mut out = Vec::new();
+        out.extend(check_hidden_processes());
+        out.extend(check_hidden_modules());
+        out.extend(check_ld_preload());
+        out.extend(check_kernel_taint());
+        out
+    }
+    #[cfg(windows)]
+    {
+        aegis_platform::default_integrity_checks().scan()
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        Vec::new()
+    }
 }
 
 // --- hidden processes -------------------------------------------------
@@ -36,6 +49,7 @@ pub fn scan() -> Vec<Detection> {
 /// is directly statable for thread IDs even though threads do not appear in the
 /// top-level `/proc` readdir, so a naive process-only listing would flag every
 /// thread as hidden.
+#[allow(dead_code)]
 fn listed_tasks() -> BTreeSet<u32> {
     let mut ids = BTreeSet::new();
     if let Ok(entries) = std::fs::read_dir("/proc") {
@@ -195,11 +209,11 @@ fn check_ld_preload() -> Vec<Detection> {
 /// Decode the taint bitmask into human-readable flags relevant to rootkits.
 pub fn decode_taint(value: u64) -> Vec<&'static str> {
     const FLAGS: &[(u64, &str)] = &[
-        (1 << 0, "proprietary module loaded (G/P)"),
-        (1 << 1, "module force-loaded"),
-        (1 << 5, "unsigned/out-of-tree module"),
-        (1 << 12, "external/unsigned module (E)"),
-        (1 << 13, "unsigned module (K removed)"),
+        (1 << 0, "proprietary module loaded (P)"),
+        (1 << 1, "module force-loaded (F)"),
+        (1 << 5, "bad page encountered (B)"),
+        (1 << 12, "out-of-tree module loaded (O)"),
+        (1 << 13, "unsigned module loaded (E)"),
     ];
     FLAGS
         .iter()

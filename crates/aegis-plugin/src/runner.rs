@@ -78,15 +78,26 @@ pub fn run(
     }
 
     let entry = plugin.dir.join(&manifest.entrypoint);
-    let mut child = Command::new(&entry)
-        .current_dir(&plugin.dir)
-        // Minimal environment: don't leak the host's env to the plugin.
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
+    let mut cmd = if cfg!(windows) && manifest.entrypoint.ends_with(".sh") {
+        let mut c = Command::new("sh");
+        c.arg(&entry);
+        c
+    } else if cfg!(windows) && (manifest.entrypoint.ends_with(".bat") || manifest.entrypoint.ends_with(".cmd")) {
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg(&entry);
+        c
+    } else {
+        Command::new(&entry)
+    };
+    cmd.current_dir(&plugin.dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+        .stderr(Stdio::piped());
+
+    #[cfg(unix)]
+    cmd.env_clear().env("PATH", "/usr/bin:/bin");
+
+    let mut child = cmd.spawn()?;
 
     // Send the request.
     let payload = serde_json::to_vec(request)?;
@@ -103,7 +114,7 @@ pub fn run(
         std::thread::spawn(move || {
             std::thread::sleep(timeout);
             if !finished.load(Ordering::SeqCst) {
-                let _ = Command::new("kill").arg("-9").arg(pid.to_string()).status();
+                let _ = aegis_platform::default_process_control().kill(pid);
             }
         });
     }
@@ -143,6 +154,7 @@ mod tests {
             entrypoint: "run.sh".into(),
             api_version: API_VERSION,
             permissions: perms,
+            targets: std::collections::BTreeMap::new(),
         };
         let kp = KeyPair::generate();
         let sig = kp.sign(&manifest);

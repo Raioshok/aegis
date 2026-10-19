@@ -122,6 +122,70 @@ enum Command {
         #[command(subcommand)]
         action: Option<OptimizeCmd>,
     },
+    /// Manage Windows / Linux startup autostart.
+    Autostart {
+        #[command(subcommand)]
+        action: AutostartCmd,
+    },
+    /// Kaspersky-style Game Mode controls (auto-detect full-screen & throttle CPU).
+    Gamemode {
+        #[command(subcommand)]
+        action: Option<GameModeCmd>,
+    },
+    /// Manage modular protection shields.
+    Shields {
+        #[command(subcommand)]
+        action: Option<ShieldsCmd>,
+    },
+    /// Telemetry & training gateway for guest detonation labs.
+    Gateway {
+        #[command(subcommand)]
+        action: Option<GatewayCmd>,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum GatewayCmd {
+    /// Start the telemetry and training gateway server.
+    Start {
+        #[arg(long, default_value_t = 9090)]
+        port: u16,
+    },
+    /// Query current detonation lab telemetry stats.
+    Status {
+        #[arg(long, default_value_t = 9090)]
+        port: u16,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone, Copy)]
+enum GameModeCmd {
+    /// Check live Game Mode status and full-screen D3D detection.
+    Status,
+    /// Enable Game Mode (throttles background scans & drops CPU priority).
+    Enable,
+    /// Disable Game Mode (restores full background scanning).
+    Disable,
+}
+
+#[derive(Subcommand, Debug, Clone, Copy)]
+enum ShieldsCmd {
+    /// Show all modular shields and their armed status.
+    Status,
+    /// Enable all defensive shields.
+    EnableAll,
+    /// Disable all defensive shields.
+    DisableAll,
+}
+
+#[derive(Subcommand, Debug)]
+enum AutostartCmd {
+    /// Check whether autostart on system boot is enabled.
+    Status,
+    /// Enable starting Aegis automatically on login.
+    Enable,
+    /// Disable starting Aegis automatically on login.
+    Disable,
 }
 
 #[derive(Subcommand)]
@@ -305,6 +369,131 @@ fn run(cli: &Cli) -> aegis_core::Result<i32> {
             *cpu,
             command.clone(),
         )),
+        Command::Autostart { action } => {
+            let mgr = aegis_platform::default_autostart();
+            match action {
+                AutostartCmd::Status => {
+                    let active = mgr.is_enabled();
+                    println!("Aegis autostart: {}", if active { "ENABLED (starts on user logon)" } else { "DISABLED" });
+                }
+                AutostartCmd::Enable => {
+                    let current_exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("aegis"));
+                    mgr.set_enabled(true, &current_exe)?;
+                    println!("Aegis autostart enabled: registered in startup registry & task scheduler.");
+                }
+                AutostartCmd::Disable => {
+                    let current_exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("aegis"));
+                    mgr.set_enabled(false, &current_exe)?;
+                    println!("Aegis autostart disabled: removed from startup registry & task scheduler.");
+                }
+            }
+            Ok(0)
+        }
+        Command::Gamemode { action } => {
+            let action = action.unwrap_or(GameModeCmd::Status);
+            let mut cfg = aegis_core::Config::load();
+            let is_gaming = aegis_platform::is_gaming_active();
+            match action {
+                GameModeCmd::Status => {
+                    println!("Aegis Kaspersky-Style Game Mode:");
+                    println!("  Enabled:             {}", if cfg.game_mode.enabled { "YES" } else { "NO" });
+                    println!("  Auto-Detect Fullscreen/D3D: {}", if cfg.game_mode.auto_detect { "YES" } else { "NO" });
+                    println!("  Live Game Detected:  {}", if is_gaming { "YES (Active Full-Screen App)" } else { "NO" });
+                    let throttled = cfg.game_mode.enabled && (is_gaming || !cfg.game_mode.auto_detect);
+                    println!("  CPU Priority:        {}", if throttled { "IDLE_PRIORITY_CLASS (Throttled)" } else { "NORMAL_PRIORITY_CLASS" });
+                    println!("  Background Scans:    {}", if throttled { "PAUSED" } else { "ACTIVE" });
+                }
+                GameModeCmd::Enable => {
+                    cfg.game_mode.enabled = true;
+                    cfg.save()?;
+                    println!("Game Mode enabled. CPU will automatically throttle when games launch.");
+                }
+                GameModeCmd::Disable => {
+                    cfg.game_mode.enabled = false;
+                    cfg.save()?;
+                    aegis_platform::set_process_resource_mode(false);
+                    println!("Game Mode disabled. Running in full performance mode.");
+                }
+            }
+            Ok(0)
+        }
+        Command::Shields { action } => {
+            let action = action.unwrap_or(ShieldsCmd::Status);
+            let mut cfg = aegis_core::Config::load();
+            match action {
+                ShieldsCmd::Status => {
+                    println!("Aegis Modular Protection Shields:");
+                    println!("  Real-time File System: {}", if cfg.shields.realtime_filesystem { "ARMED" } else { "OFF" });
+                    println!("  Memory & Injection:    {}", if cfg.shields.memory_defense { "ARMED" } else { "OFF" });
+                    println!("  Network & Firewall:    {}", if cfg.shields.network_firewall { "ARMED" } else { "OFF" });
+                    println!("  Ransomware Watchdog:   {}", if cfg.shields.ransomware_guard { "ARMED" } else { "OFF" });
+                    println!("  Cloud Threat Feeds:    {}", if cfg.shields.cloud_threat_feeds { "ARMED" } else { "OFF" });
+                }
+                ShieldsCmd::EnableAll => {
+                    cfg.shields.realtime_filesystem = true;
+                    cfg.shields.memory_defense = true;
+                    cfg.shields.network_firewall = true;
+                    cfg.shields.ransomware_guard = true;
+                    cfg.shields.cloud_threat_feeds = true;
+                    cfg.save()?;
+                    println!("All protection shields ARMED.");
+                }
+                ShieldsCmd::DisableAll => {
+                    cfg.shields.realtime_filesystem = false;
+                    cfg.shields.memory_defense = false;
+                    cfg.shields.network_firewall = false;
+                    cfg.shields.ransomware_guard = false;
+                    cfg.shields.cloud_threat_feeds = false;
+                    cfg.save()?;
+                    println!("All protection shields DISABLED.");
+                }
+            }
+            Ok(0)
+        }
+        Command::Gateway { action } => {
+            let action = action.clone().unwrap_or(GatewayCmd::Start { port: 9090 });
+            match action {
+                GatewayCmd::Start { port } => {
+                    println!("Aegis Telemetry & Training Gateway starting on 0.0.0.0:{port}...");
+                    println!("Listening for guest VM reports on host-only adapter (192.168.58.1:{port})");
+                    let server = aegis_daemon::GatewayServer::new(port);
+                    let rt = tokio::runtime::Runtime::new()
+                        .map_err(|e| aegis_core::AegisError::Engine { engine: "gateway".into(), reason: e.to_string() })?;
+                    rt.block_on(async {
+                        server.run().await
+                    })
+                    .map_err(|e| aegis_core::AegisError::Engine { engine: "gateway".into(), reason: e.to_string() })?;
+                    Ok(0)
+                }
+                GatewayCmd::Status { port } => {
+                    let rt = tokio::runtime::Runtime::new()
+                        .map_err(|e| aegis_core::AegisError::Engine { engine: "gateway".into(), reason: e.to_string() })?;
+                    rt.block_on(async {
+                        let client = tokio::net::TcpStream::connect(format!("127.0.0.1:{port}")).await;
+                        match client {
+                            Ok(mut stream) => {
+                                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                                let req = format!("GET /api/v1/telemetry/stats HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+                                let _ = stream.write_all(req.as_bytes()).await;
+                                let mut buf = vec![0u8; 4096];
+                                if let Ok(n) = stream.read(&mut buf).await {
+                                    let s = String::from_utf8_lossy(&buf[..n]);
+                                    if let Some(pos) = s.find("\r\n\r\n") {
+                                        println!("{}", &s[pos + 4..]);
+                                    } else {
+                                        println!("{s}");
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Gateway not reachable on port {port}: {e}");
+                            }
+                        }
+                    });
+                    Ok(0)
+                }
+            }
+        }
         other => {
             let app = App::new()?;
             match other {

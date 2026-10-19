@@ -36,8 +36,35 @@ pub fn features(qname: &str) -> DnsFeatures {
     }
 }
 
+/// CDN and major cloud domains that routinely use high-entropy subdomains.
+const POPULAR_ALLOWLIST: &[&str] = &[
+    "akamaiedge.net",
+    "akamai.net",
+    "cloudflare.com",
+    "cloudfront.net",
+    "fastly.net",
+    "google.com",
+    "googleapis.com",
+    "microsoft.com",
+    "azure.com",
+    "windowsupdate.com",
+    "github.com",
+    "githubusercontent.com",
+];
+
+pub fn is_allowlisted_domain(qname: &str) -> bool {
+    let lower = qname.to_ascii_lowercase();
+    let name = lower.trim_end_matches('.');
+    POPULAR_ALLOWLIST.iter().any(|&domain| {
+        name == domain || name.ends_with(&format!(".{domain}"))
+    })
+}
+
 /// Suspicion score in 0.0–1.0. Higher = more tunnel/DGA-like.
 pub fn tunnel_score(qname: &str) -> f64 {
+    if is_allowlisted_domain(qname) {
+        return 0.0;
+    }
     let f = features(qname);
     let mut score = 0.0f64;
     // Very long names are unusual for legitimate lookups.

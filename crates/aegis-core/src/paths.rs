@@ -56,6 +56,11 @@ pub fn user_rules_dir() -> PathBuf {
     config_dir().join("yara-rules")
 }
 
+/// Directory holding downloaded threat intelligence feeds & known-bad hashes.
+pub fn threat_intel_dir() -> PathBuf {
+    config_dir().join("threat-intel")
+}
+
 /// Runtime directory for the daemon socket (`$XDG_RUNTIME_DIR/aegis` per-user,
 /// or `/run/aegis` when running as the system daemon).
 pub fn runtime_dir() -> PathBuf {

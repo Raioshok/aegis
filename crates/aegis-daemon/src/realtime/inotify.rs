@@ -1,4 +1,6 @@
 //! Unprivileged real-time watcher built on `inotify`.
+
+#![cfg(target_os = "linux")]
 //!
 //! inotify is per-directory and not recursive, so we add a watch on each
 //! configured root and on every existing subdirectory, and dynamically add
@@ -133,9 +135,10 @@ fn add_watch_recursive(
     }
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                add_watch_recursive(inotify, &p, wd_paths);
+            if let Ok(ft) = entry.file_type() {
+                if ft.is_dir() && !ft.is_symlink() {
+                    add_watch_recursive(inotify, &entry.path(), wd_paths);
+                }
             }
         }
     }

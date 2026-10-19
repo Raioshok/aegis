@@ -13,6 +13,7 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+dirs = "5"
 
 # Aegis engine crates (path deps into the sibling workspace).
 aegis-core = { path = "../../crates/aegis-core" }
@@ -25,13 +26,16 @@ aegis-network = { path = "../../crates/aegis-network" }
 aegis-plugin = { path = "../../crates/aegis-plugin" }
 aegis-optimize = { path = "../../crates/aegis-optimize" }
 aegis-ipc = { path = "../../crates/aegis-ipc" }
+aegis-platform = { path = "../../crates/aegis-platform" }
+aegis-android = { path = "../../crates/aegis-android" }
 
 [features]
+default = ["custom-protocol"]
 # Enables Tauri's custom-protocol asset loading in production builds.
 custom-protocol = ["tauri/custom-protocol"]
 
 [profile.release]
-opt-level = "s"
-lto = true
-codegen-units = 1
+opt-level = 2
+lto = "thin"
+codegen-units = 16
 strip = true

@@ -35,31 +35,48 @@ fn default_true() -> bool {
     true
 }
 
+fn normalize_path_str(p: &Path) -> String {
+    let s = p.to_string_lossy().replace('\\', "/");
+    let trimmed = if let Some(stripped) = s.strip_prefix("//?/") {
+        stripped
+    } else {
+        &s
+    };
+    #[cfg(windows)]
+    {
+        trimmed.to_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        trimmed.to_string()
+    }
+}
+
+/// Warn when adding risky whitelist paths like `/` or downloads folders.
+pub fn check_risky_whitelist_path(path: &Path) -> Option<&'static str> {
+    let s = path.to_string_lossy().replace('\\', "/");
+    let norm = s.trim_end_matches('/');
+    if norm.is_empty() || norm == "/" || norm == "c:" || norm == "c" {
+        return Some("Whitelisting root directory (/) disables protection for the entire system!");
+    }
+    if norm.ends_with("/Downloads") || norm.ends_with("/downloads") || norm == "/tmp" || norm == "/var/tmp" {
+        return Some("Whitelisting a writable download or temp folder leaves an easy infection vector open.");
+    }
+    None
+}
+
 impl WhitelistRule {
     fn matches_path(&self, target: &Path) -> bool {
         if self.kind != RuleKind::Path {
             return false;
         }
-        let rule_path = Path::new(&self.value);
-        // Prefer canonical comparison; fall back to lexical if either path
-        // cannot be canonicalized (e.g. the file was already deleted).
-        let target_c = target.canonicalize();
-        let rule_c = rule_path.canonicalize();
-        match (&target_c, &rule_c) {
-            (Ok(t), Ok(r)) => {
-                if self.recursive {
-                    t == r || t.starts_with(r)
-                } else {
-                    t == r
-                }
-            }
-            _ => {
-                if self.recursive {
-                    target.starts_with(rule_path)
-                } else {
-                    target == rule_path
-                }
-            }
+        let norm_target = normalize_path_str(target);
+        let norm_rule = normalize_path_str(Path::new(&self.value));
+        if self.recursive {
+            norm_target == norm_rule
+                || norm_target.starts_with(&format!("{}/", norm_rule.trim_end_matches('/')))
+        } else {
+            norm_target == norm_rule
         }
     }
 
@@ -98,17 +115,36 @@ impl Whitelist {
         })
     }
 
+    pub fn matched_path<'a>(&'a self, path: &Path) -> Option<&'a WhitelistRule> {
+        self.rules.iter().find(|r| r.matches_path(path))
+    }
+
+    pub fn matched_hash<'a>(&'a self, sha256: &str) -> Option<&'a WhitelistRule> {
+        if sha256.is_empty() {
+            return None;
+        }
+        self.rules.iter().find(|r| r.matches_hash(sha256))
+    }
+
+    pub fn is_path_whitelisted(&self, path: &Path) -> bool {
+        self.matched_path(path).is_some()
+    }
+
+    pub fn is_hash_whitelisted(&self, sha256: &str) -> bool {
+        self.matched_hash(sha256).is_some()
+    }
+
     pub fn is_whitelisted(&self, path: &Path, sha256: &str) -> bool {
         self.matched(path, sha256).is_some()
     }
 
     /// Trust a directory or file by path. De-duplicates on the resolved value.
     pub fn add_path(&mut self, path: &Path, label: impl Into<String>, recursive: bool, now: i64) {
-        let value = path
+        let canonical = path
             .canonicalize()
-            .unwrap_or_else(|_| path.to_path_buf())
-            .to_string_lossy()
-            .into_owned();
+            .unwrap_or_else(|_| path.to_path_buf());
+        let s = canonical.to_string_lossy().to_string();
+        let value = s.strip_prefix(r"\\?\").unwrap_or(&s).to_string();
         if let Some(existing) = self
             .rules
             .iter_mut()
@@ -156,8 +192,18 @@ impl Whitelist {
     /// Remove a rule by its value; returns true if something was removed.
     pub fn remove(&mut self, value: &str) -> bool {
         let before = self.rules.len();
-        self.rules.retain(|r| r.value != value);
-        self.rules.len() != before
+        let norm_needle = normalize_path_str(Path::new(value));
+        self.rules.retain(|r| {
+            if r.value == value {
+                return false;
+            }
+            if r.kind == RuleKind::Path {
+                normalize_path_str(Path::new(&r.value)) != norm_needle
+            } else {
+                !r.value.eq_ignore_ascii_case(value)
+            }
+        });
+        self.rules.len() < before
     }
 }
 

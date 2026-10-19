@@ -90,12 +90,14 @@ pub fn sandbox(
     command: Vec<String>,
 ) -> i32 {
     use aegis_behavior::sandbox::{restrict_current, SandboxPolicy};
+    #[cfg(unix)]
     use std::os::unix::process::CommandExt;
 
     if command.is_empty() {
         eprintln!("sandbox: no command given (use `-- <cmd>`)");
         return 2;
     }
+    #[cfg(target_os = "linux")]
     if !aegis_behavior::sandbox::landlock_supported() {
         eprintln!("sandbox: this kernel does not support Landlock");
         return 2;
@@ -115,9 +117,9 @@ pub fn sandbox(
     match restrict_current(&policy) {
         Ok(outcome) => {
             eprintln!(
-                "{} sandbox active (landlock: {:?}); executing: {}",
+                "{} sandbox active (status: {}); executing: {}",
                 render::paint(render::GREEN, "✓"),
-                outcome.landlock,
+                outcome.status,
                 command.join(" ")
             );
         }
@@ -127,10 +129,25 @@ pub fn sandbox(
         }
     }
 
-    // exec replaces this (now-confined) process image with the target.
-    let err = std::process::Command::new(&command[0])
-        .args(&command[1..])
-        .exec();
-    eprintln!("sandbox: exec failed: {err}");
-    126
+    #[cfg(unix)]
+    {
+        let err = std::process::Command::new(&command[0])
+            .args(&command[1..])
+            .exec();
+        eprintln!("sandbox: exec failed: {err}");
+        126
+    }
+    #[cfg(not(unix))]
+    {
+        match std::process::Command::new(&command[0])
+            .args(&command[1..])
+            .status()
+        {
+            Ok(status) => status.code().unwrap_or(0),
+            Err(err) => {
+                eprintln!("sandbox: spawn failed: {err}");
+                126
+            }
+        }
+    }
 }

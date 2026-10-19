@@ -12,8 +12,14 @@
 //! The seam between "what produces events" and "what we do about them" keeps the
 //! scan/quarantine pipeline testable without any kernel privileges.
 
+#[cfg(target_os = "linux")]
 pub mod fanotify;
+#[cfg(target_os = "linux")]
 pub mod inotify;
+
+#[cfg(windows)]
+pub mod windows_watcher;
+
 mod monitor;
 
 pub use monitor::Monitor;

@@ -96,7 +96,8 @@ impl Rule {
         );
         let mut line = parts.join(" ");
         if !self.comment.is_empty() {
-            line.push_str(&format!(" comment \"{}\"", self.comment.replace('"', "'")));
+            let clean_comment = self.comment.replace(['\n', '\r', '"'], " ");
+            line.push_str(&format!(" comment \"{}\"", clean_comment));
         }
         line
     }

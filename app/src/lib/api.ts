@@ -96,6 +96,39 @@ export interface OptimizeReport {
   opportunities: number;
 }
 
+export interface ProcessItem {
+  pid: number;
+  name: string;
+  path: string;
+  is_signed: boolean;
+  is_suspicious: boolean;
+  risk_score: number;
+}
+
+export interface VulnerabilityItem {
+  id: string;
+  title: string;
+  category: string;
+  severity: string;
+  detail: string;
+  status: string;
+  fixable: boolean;
+}
+
+export interface SecurityAuditReport {
+  overall_score: number;
+  items: VulnerabilityItem[];
+  issues_count: number;
+}
+
+export interface FeedSyncResult {
+  success: boolean;
+  hashes_updated: number;
+  ips_updated: number;
+  yara_rules_version: string;
+  message: string;
+}
+
 export const api = {
   dashboard: () => invoke<Dashboard>("dashboard"),
   runScan: (path: string) => invoke<ScanReport>("run_scan", { path }),
@@ -113,7 +146,73 @@ export const api = {
   networkScan: () => invoke<NetworkReport>("network_scan"),
   pluginsList: () => invoke<PluginRow[]>("plugins_list"),
   optimizeScan: () => invoke<OptimizeReport>("optimize_scan"),
+  isAutostartActive: () => invoke<boolean>("is_autostart_active"),
+  toggleAutostart: (enable: boolean) => invoke<boolean>("toggle_autostart", { enable }),
+  listProcesses: () => invoke<ProcessItem[]>("list_processes"),
+  killProcess: (pid: number) => invoke<void>("kill_process", { pid }),
+  inspectProcessMemory: (pid: number) => invoke<ThreatRow[]>("inspect_process_memory", { pid }),
+  securityAudit: () => invoke<SecurityAuditReport>("security_audit"),
+  syncThreatFeeds: () => invoke<FeedSyncResult>("sync_threat_feeds"),
+  deployHoneypot: () => invoke<string>("deploy_ransomware_honeypot"),
+  getProtectionConfig: () => invoke<ProtectionConfig>("get_protection_config"),
+  setProtectionConfig: (dto: ProtectionConfig) => invoke<void>("set_protection_config", { dto }),
+  getGameModeStatus: () => invoke<GameModeStatus>("get_game_mode_status"),
+  toggleGameMode: (enabled: boolean) => invoke<GameModeStatus>("toggle_game_mode", { enabled }),
+  getScanProgress: () => invoke<ScanProgress>("get_scan_progress"),
+  getSmartScanTarget: () => invoke<string>("get_smart_scan_target"),
+  scanAndroidPackage: (path: string) => invoke<ApkReport>("scan_android_package", { path }),
 };
+
+export interface DexAnalysis {
+  is_valid_dex: boolean;
+  string_count: number;
+  detected_indicators: string[];
+  suspicious_strings: string[];
+  risk_score: number;
+}
+
+export interface ApkReport {
+  filename: string;
+  package_name: string | null;
+  sha256: string;
+  size_bytes: number;
+  dangerous_permissions: string[];
+  total_permissions: number;
+  dex_analyses: DexAnalysis[];
+  threats: string[];
+  overall_risk_score: number;
+  verdict: string;
+}
+
+export interface ScanProgress {
+  is_active: boolean;
+  current_file: string;
+  scanned: number;
+  total: number;
+  threats: number;
+  rate: number;
+  elapsed_secs: number;
+  percent: number;
+}
+
+export interface ProtectionConfig {
+  realtime_filesystem: boolean;
+  memory_defense: boolean;
+  network_firewall: boolean;
+  ransomware_guard: boolean;
+  cloud_threat_feeds: boolean;
+  game_mode_enabled: boolean;
+  game_mode_auto_detect: boolean;
+  entropy_threshold: number;
+}
+
+export interface GameModeStatus {
+  is_gaming_active: boolean;
+  game_mode_enabled: boolean;
+  auto_detect: boolean;
+  priority_lowered: boolean;
+  background_scans_paused: boolean;
+}
 
 export function impactColor(i: number): string {
   switch (i) {

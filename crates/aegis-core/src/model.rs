@@ -74,6 +74,131 @@ pub enum ThreatClass {
     Unknown,
 }
 
+/// Standardized high-level verdict level (replacing binary threat / max severity).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum VerdictLevel {
+    Clean = 0,
+    Suspicious = 1,
+    Malware = 2,
+}
+
+impl VerdictLevel {
+    pub fn label(self) -> &'static str {
+        match self {
+            VerdictLevel::Clean => "Clean",
+            VerdictLevel::Suspicious => "PUA/Suspicious",
+            VerdictLevel::Malware => "Malware",
+        }
+    }
+
+    pub fn ansi(self) -> &'static str {
+        match self {
+            VerdictLevel::Clean => "\x1b[32m",
+            VerdictLevel::Suspicious => "\x1b[33m",
+            VerdictLevel::Malware => "\x1b[31m",
+        }
+    }
+}
+
+/// Action to take on an access event (fanotify or minifilter).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GateVerdict {
+    Allow,
+    Deny,
+    Audit,
+}
+
+/// Memory mapping region for memory inspection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MapRegion {
+    pub start: usize,
+    pub end: usize,
+    pub permissions: String,
+    pub is_private: bool,
+    pub is_executable: bool,
+    pub is_writable: bool,
+    pub pathname: Option<String>,
+}
+
+/// Connection record for network inspection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Connection {
+    pub protocol: String,
+    pub local: std::net::IpAddr,
+    pub local_port: u16,
+    pub remote: std::net::IpAddr,
+    pub remote_port: u16,
+    pub state: String,
+    pub uid: u32,
+    pub pid: Option<u32>,
+    pub inode: u64,
+}
+
+impl Connection {
+    pub fn is_listening(&self) -> bool {
+        self.state == "LISTEN"
+    }
+    pub fn is_established(&self) -> bool {
+        self.state == "ESTABLISHED"
+    }
+}
+
+/// Real-time file access event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AccessEventType {
+    Open,
+    OpenExec,
+    CloseWrite,
+    Modify,
+    Rename,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccessEvent {
+    pub path: PathBuf,
+    pub pid: u32,
+    pub event_type: AccessEventType,
+    pub file_id: Option<u64>,
+}
+
+/// Firewall block sets.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BlockSets {
+    pub ipv4: Vec<std::net::Ipv4Addr>,
+    pub ipv6: Vec<std::net::Ipv6Addr>,
+    pub app_paths: Vec<PathBuf>,
+}
+
+/// Sandbox constraints.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SandboxPolicy {
+    pub allow_network: bool,
+    pub read_paths: Vec<PathBuf>,
+    pub write_paths: Vec<PathBuf>,
+    pub memory_limit_bytes: Option<u64>,
+    pub cpu_limit_pct: Option<u32>,
+}
+
+/// Process creation/termination event for behaviour engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProcessEventKind {
+    Exec,
+    Fork,
+    Exit,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessEvent {
+    pub pid: u32,
+    pub ppid: u32,
+    pub exe: PathBuf,
+    pub cmdline: Vec<String>,
+    pub kind: ProcessEventKind,
+    pub timestamp_ms: u64,
+}
+
 /// A single verdict from one engine about one file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Detection {
@@ -85,6 +210,16 @@ pub struct Detection {
     pub class: ThreatClass,
     /// Human-readable explanation.
     pub detail: String,
+    /// Detection weight (importance of engine/rule, 0.0 - 1.0).
+    #[serde(default = "default_one")]
+    pub weight: f32,
+    /// Detection confidence (0.0 - 1.0).
+    #[serde(default = "default_one")]
+    pub confidence: f32,
+}
+
+fn default_one() -> f32 {
+    1.0
 }
 
 impl Detection {
@@ -95,12 +230,41 @@ impl Detection {
         class: ThreatClass,
         detail: impl Into<String>,
     ) -> Self {
+        let (weight, confidence) = match severity {
+            Severity::Critical => (1.0, 1.0),
+            Severity::High => (0.85, 0.85),
+            Severity::Medium => (0.65, 0.65),
+            Severity::Low => (0.40, 0.40),
+            Severity::Clean => (0.0, 0.0),
+        };
         Self {
             engine: engine.into(),
             threat: threat.into(),
             severity,
             class,
             detail: detail.into(),
+            weight,
+            confidence,
+        }
+    }
+
+    pub fn with_scores(
+        engine: impl Into<String>,
+        threat: impl Into<String>,
+        severity: Severity,
+        class: ThreatClass,
+        detail: impl Into<String>,
+        weight: f32,
+        confidence: f32,
+    ) -> Self {
+        Self {
+            engine: engine.into(),
+            threat: threat.into(),
+            severity,
+            class,
+            detail: detail.into(),
+            weight,
+            confidence,
         }
     }
 }
@@ -130,9 +294,49 @@ impl FileVerdict {
         }
     }
 
-    /// Whether this file should be treated as a threat.
+    /// Whether this file should be treated as a threat (Malware or Suspicious).
     pub fn is_threat(&self) -> bool {
         !self.whitelisted && !self.detections.is_empty()
+    }
+
+    /// Combined confidence score (0.0 to 1.0) taking multi-engine consensus into account.
+    pub fn confidence(&self) -> f32 {
+        if self.whitelisted || self.detections.is_empty() {
+            return 0.0;
+        }
+        let mut unreached = 1.0f32;
+        let mut distinct_engines = std::collections::HashSet::new();
+        for d in &self.detections {
+            let score = (d.weight * d.confidence).clamp(0.0, 0.95);
+            unreached *= 1.0 - score;
+            distinct_engines.insert(d.engine.as_str());
+        }
+        let mut combined = 1.0 - unreached;
+        // Agreement bonus: raise score when distinct engines agree
+        if distinct_engines.len() > 1 {
+            combined += 0.15 * (distinct_engines.len() - 1) as f32;
+        }
+        combined.clamp(0.0, 1.0)
+    }
+
+    /// The verdict level: Clean, PUA/Suspicious, or Malware.
+    pub fn verdict_level(&self) -> VerdictLevel {
+        if self.whitelisted || self.detections.is_empty() {
+            return VerdictLevel::Clean;
+        }
+        let conf = self.confidence();
+        if conf >= 0.70 {
+            VerdictLevel::Malware
+        } else if conf >= 0.30 {
+            VerdictLevel::Suspicious
+        } else {
+            VerdictLevel::Clean
+        }
+    }
+
+    /// Whether this verdict warrants automatic quarantine (Malware only).
+    pub fn should_quarantine(&self) -> bool {
+        !self.whitelisted && self.verdict_level() == VerdictLevel::Malware
     }
 
     /// The highest severity among all detections (or `Clean`).

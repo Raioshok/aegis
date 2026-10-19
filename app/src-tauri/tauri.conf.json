@@ -5,16 +5,14 @@
   "identifier": "dev.aegis.app",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build"
   },
   "app": {
     "windows": [
       {
-        "title": "Aegis",
-        "width": 1220,
-        "height": 840,
+        "title": "Aegis Total Security",
+        "width": 1280,
+        "height": 860,
         "minWidth": 940,
         "minHeight": 640,
         "resizable": true,

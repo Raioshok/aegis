@@ -16,6 +16,7 @@ fanotify = ["aegis-daemon/fanotify"]
 
 [dependencies]
 aegis-core.workspace = true
+aegis-platform.workspace = true
 aegis-engine.workspace = true
 aegis-storage.workspace = true
 aegis-quarantine.workspace = true

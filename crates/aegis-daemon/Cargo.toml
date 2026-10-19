@@ -7,25 +7,34 @@ license.workspace = true
 description = "Aegis background daemon: real-time protection, IPC server, scheduler"
 
 [features]
-# fanotify requires CAP_SYS_ADMIN and pulls the version-sensitive nix binding;
-# kept opt-in so the default build/test path relies only on unprivileged inotify.
 default = []
 fanotify = ["dep:nix"]
 
 [dependencies]
 aegis-core.workspace = true
+aegis-platform.workspace = true
 aegis-engine.workspace = true
 aegis-storage.workspace = true
 aegis-quarantine.workspace = true
 aegis-behavior.workspace = true
 aegis-ipc.workspace = true
 tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
 inotify.workspace = true
 nix = { workspace = true, optional = true }
 sd-notify.workspace = true
-tracing.workspace = true
-tracing-subscriber.workspace = true
-serde_json.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8"
+windows-sys = { version = "0.61", features = [
+    "Win32_Security",
+    "Win32_System_Pipes",
+] }
 
 [dev-dependencies]
 tempfile = "3"

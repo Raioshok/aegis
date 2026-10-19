@@ -30,6 +30,7 @@ impl Database {
             std::fs::create_dir_all(parent).map_err(|e| AegisError::io(parent, e))?;
         }
         let conn = Connection::open(path).map_err(|e| AegisError::Storage(e.to_string()))?;
+        let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
         let db = Self {
             conn: Mutex::new(conn),
         };
@@ -40,6 +41,7 @@ impl Database {
     /// In-memory database (used by tests).
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory().map_err(|e| AegisError::Storage(e.to_string()))?;
+        let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
         let db = Self {
             conn: Mutex::new(conn),
         };
@@ -85,7 +87,8 @@ impl Database {
                 size           INTEGER NOT NULL,
                 quarantined_at INTEGER NOT NULL,
                 stored_name    TEXT    NOT NULL,
-                nonce          BLOB    NOT NULL
+                nonce          BLOB    NOT NULL,
+                status         TEXT    NOT NULL DEFAULT 'quarantined'
             );
 
             CREATE INDEX IF NOT EXISTS idx_threats_scan ON threats(scan_id);

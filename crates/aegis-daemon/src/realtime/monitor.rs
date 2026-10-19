@@ -178,6 +178,8 @@ impl Monitor {
         let reason = match alert.reason {
             AlertReason::MassEncryption => "mass-encryption",
             AlertReason::RenameStorm => "rename-storm",
+            AlertReason::CanaryTripped => "canary-tripped",
+            AlertReason::ShadowCopyDeletion => "shadow-copy-deletion",
         };
         tracing::error!(
             reason,

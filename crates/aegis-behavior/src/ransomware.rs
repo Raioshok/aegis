@@ -66,6 +66,10 @@ pub enum AlertReason {
     MassEncryption,
     /// Many files renamed to the same new extension.
     RenameStorm,
+    /// Canary decoy file modified or encrypted (tripwire).
+    CanaryTripped,
+    /// Shadow copy deletion command executed (Windows).
+    ShadowCopyDeletion,
 }
 
 /// A ransomware alert.
@@ -213,6 +217,34 @@ fn dominant_rename_ext(window: &VecDeque<Record>) -> Option<(String, usize)> {
         }
     }
     counts.into_iter().max_by_key(|(_, c)| *c)
+}
+
+/// Check if a process command-line is attempting to delete shadow copies or disable recovery.
+pub fn check_shadow_copy_deletion(cmdline: &str) -> bool {
+    let lower = cmdline.to_ascii_lowercase();
+    (lower.contains("vssadmin") && lower.contains("delete") && lower.contains("shadows"))
+        || (lower.contains("wmic") && lower.contains("shadowcopy") && lower.contains("delete"))
+        || (lower.contains("wbadmin") && lower.contains("delete") && lower.contains("catalog"))
+        || (lower.contains("bcdedit") && lower.contains("recoveryenabled") && lower.contains("no"))
+}
+
+/// Check if file magic bytes belong to a legitimate compressed format (archive).
+pub fn is_compressed_archive(magic: &[u8]) -> bool {
+    magic.starts_with(b"PK\x03\x04") // ZIP / DOCX / JAR
+        || magic.starts_with(b"\x1f\x8b") // GZIP
+        || magic.starts_with(b"7z\xbc\xaf\x27\x1c") // 7-Zip
+        || magic.starts_with(b"Rar!\x1a\x07") // RAR
+        || magic.starts_with(b"\x28\xb5\x2f\xfd") // Zstandard
+        || magic.starts_with(b"\xfd7zXZ\x00") // XZ
+}
+
+/// Generate collision-safe snapshot name based on SHA-256 hash of original path.
+pub fn snapshot_name(original_path: &Path) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    original_path.to_string_lossy().hash(&mut hasher);
+    format!("{:016x}.snap", hasher.finish())
 }
 
 #[cfg(test)]

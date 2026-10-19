@@ -14,6 +14,7 @@
 //! (those the caller is permitted to inspect).
 
 use aegis_core::{Detection, Severity, ThreatClass};
+use std::path::Path;
 
 /// A single parsed line of `/proc/<pid>/maps`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -151,11 +152,215 @@ pub fn classify(pid: u32, regions: &[MapRegion]) -> Vec<Detection> {
     out
 }
 
+/// Check whether a function prologue exhibits known evasion patches (AMSI/ETW bypass).
+pub fn is_known_bypass_patch(prologue: &[u8]) -> bool {
+    if prologue.is_empty() {
+        return false;
+    }
+    // ret (0xC3) directly at entrypoint
+    if prologue[0] == 0xC3 {
+        return true;
+    }
+    // ret imm16 (0xC2, 0x18, 0x00 or 0xC2, 0x14, 0x00)
+    if prologue[0] == 0xC2 {
+        return true;
+    }
+    // xor eax, eax; ret (31 C0 C3 or 33 C0 C3)
+    if prologue.len() >= 3 && (prologue[0..3] == [0x31, 0xC0, 0xC3] || prologue[0..3] == [0x33, 0xC0, 0xC3]) {
+        return true;
+    }
+    // mov eax, 0x80070057; ret (B8 57 00 07 80 C3 - common AMSI E_INVALIDARG bypass)
+    if prologue.len() >= 6 && prologue[0..6] == [0xB8, 0x57, 0x00, 0x07, 0x80, 0xC3] {
+        return true;
+    }
+    // mov eax, 0; ret (B8 00 00 00 00 C3)
+    if prologue.len() >= 6 && prologue[0..6] == [0xB8, 0x00, 0x00, 0x00, 0x00, 0xC3] {
+        return true;
+    }
+    false
+}
+
+/// Known JIT runtimes that legitimately allocate W+X memory.
+pub fn is_known_jit_process(exe: &Path) -> bool {
+    let name = exe
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    matches!(
+        name.as_str(),
+        "chrome.exe"
+            | "msedge.exe"
+            | "firefox.exe"
+            | "node.exe"
+            | "node"
+            | "java.exe"
+            | "java"
+            | "javaw.exe"
+            | "dotnet.exe"
+            | "dotnet"
+            | "code.exe"
+    )
+}
+
 /// Scan a single process by PID.
 pub fn scan_pid(pid: u32) -> Vec<Detection> {
-    match std::fs::read_to_string(format!("/proc/{pid}/maps")) {
-        Ok(content) => classify(pid, &parse_maps(&content)),
-        Err(_) => Vec::new(),
+    #[cfg(target_os = "linux")]
+    {
+        match std::fs::read_to_string(format!("/proc/{pid}/maps")) {
+            Ok(content) => {
+                let mut res = classify(pid, &parse_maps(&content));
+                if content.contains("memfd:") {
+                    res.push(Detection::new(
+                        "Memory",
+                        format!("Injected.MemfdExecution:{pid}"),
+                        Severity::High,
+                        ThreatClass::Behavioral,
+                        format!("PID {pid} executing fileless payload mapped via memfd_create"),
+                    ));
+                }
+                res
+            }
+            Err(_) => Vec::new(),
+        }
+    }
+    #[cfg(windows)]
+    {
+        let inspector = aegis_platform::default_memory_inspector();
+        let proc_ctrl = aegis_platform::default_process_control();
+        let mut out = Vec::new();
+
+        let img_path = proc_ctrl.image_path(pid);
+        let is_jit = img_path
+            .as_deref()
+            .map(is_known_jit_process)
+            .unwrap_or(false);
+
+        if let Ok(regions) = inspector.regions(pid) {
+            for r in &regions {
+                if r.is_executable && r.is_writable {
+                    // Suppress or downgrade W+X alerts for legitimate JIT engines (browsers, JVM, node)
+                    if !is_jit {
+                        out.push(Detection::new(
+                            "Memory",
+                            format!("Suspicious.WX:0x{:x}", r.start),
+                            Severity::Medium,
+                            ThreatClass::Behavioral,
+                            format!("PID {pid} has W+X page at 0x{:x}-0x{:x}", r.start, r.end),
+                        ));
+                    }
+                }
+                if r.is_executable && r.is_private {
+                    out.push(Detection::new(
+                        "Memory",
+                        format!("Injected.AnonExec:0x{:x}", r.start),
+                        Severity::High,
+                        ThreatClass::Behavioral,
+                        format!("PID {pid} has private executable page (shellcode / injection) at 0x{:x}", r.start),
+                    ));
+
+                    // Inspect content of private executable page for reflective PEs and direct syscall stubs
+                    if let Ok(mem_head) = inspector.read(pid, r) {
+                        if mem_head.starts_with(b"MZ") && mem_head.len() >= 0x40 {
+                            let pe_off = u32::from_le_bytes(mem_head[0x3c..0x40].try_into().unwrap_or([0; 4])) as usize;
+                            if pe_off + 4 <= mem_head.len() && &mem_head[pe_off..pe_off + 4] == b"PE\0\0" {
+                                out.push(Detection::new(
+                                    "Memory",
+                                    format!("Injected.ReflectivePE:0x{:x}", r.start),
+                                    Severity::Critical,
+                                    ThreatClass::Behavioral,
+                                    format!("PID {pid} has unbacked in-memory PE image (Reflective DLL injection) at 0x{:x}", r.start),
+                                ));
+                            }
+                        }
+
+                        if find_direct_syscall_stub(&mem_head) {
+                            out.push(Detection::new(
+                                "Memory",
+                                format!("Injected.DirectSyscall:0x{:x}", r.start),
+                                Severity::Critical,
+                                ThreatClass::Rootkit,
+                                format!("PID {pid} has direct syscall stubs in unbacked memory at 0x{:x} (Hell's Gate / SysWhispers EDR bypass)", r.start),
+                            ));
+                        }
+                    }
+                }
+
+                // Check for ntdll unhooking / text tampering
+                if let Some(ref path_str) = r.pathname {
+                    if path_str.to_ascii_lowercase().ends_with("ntdll.dll") && r.is_writable && r.is_executable {
+                        out.push(Detection::new(
+                            "Memory",
+                            format!("Tampering.Ntdll.RWX:{pid}"),
+                            Severity::Critical,
+                            ThreatClass::Rootkit,
+                            format!("PID {pid} modified ntdll.dll .text section to W+X (API unhooking / hook tampering)"),
+                        ));
+                    }
+                }
+            }
+
+            // Check for process hollowing
+            if let Some(exe_path) = img_path {
+                if let Ok(disk_bytes) = std::fs::read(&exe_path) {
+                    if disk_bytes.starts_with(b"MZ") && disk_bytes.len() >= 0x40 {
+                        // Find matching base header region in memory
+                        for r in &regions {
+                            if r.start < 0x7FFF_FFFF_0000 && r.permissions.starts_with('r') {
+                                if let Ok(mem_bytes) = inspector.read(pid, r) {
+                                    if mem_bytes.starts_with(b"MZ") && mem_bytes.len() >= 0x40 {
+                                        // e_lfanew pointer to PE signature at offset 0x3c
+                                        let pe_off_disk = u32::from_le_bytes(disk_bytes[0x3c..0x40].try_into().unwrap_or([0; 4])) as usize;
+                                        let pe_off_mem = u32::from_le_bytes(mem_bytes[0x3c..0x40].try_into().unwrap_or([0; 4])) as usize;
+                                        if pe_off_disk != pe_off_mem || (pe_off_disk + 4 <= disk_bytes.len() && pe_off_mem + 4 <= mem_bytes.len() && &disk_bytes[pe_off_disk..pe_off_disk + 4] != &mem_bytes[pe_off_mem..pe_off_mem + 4]) {
+                                            out.push(Detection::new(
+                                                "Memory",
+                                                format!("Injected.ProcessHollowing:{pid}"),
+                                                Severity::Critical,
+                                                ThreatClass::Behavioral,
+                                                format!("Process image at {} was hollowed in memory", exe_path.display()),
+                                            ));
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Check for unbacked thread execution & thread hijacking (Reflective DLL / Shellcode / PoolParty)
+            if let Ok(anomalies) = inspector.inspect_threads(pid) {
+                for a in anomalies {
+                    if !is_jit {
+                        if a.is_rip_unbacked {
+                            out.push(Detection::new(
+                                "Memory",
+                                format!("Injected.ThreadHijack:{pid}:{}", a.tid),
+                                Severity::Critical,
+                                ThreatClass::Behavioral,
+                                format!("PID {pid} thread {} instruction pointer (RIP=0x{:x}) in unbacked memory (Thread Hijacking / PoolParty)", a.tid, a.rip),
+                            ));
+                        } else if a.is_start_unbacked {
+                            out.push(Detection::new(
+                                "Memory",
+                                format!("Injected.UnbackedThread:{pid}:{}", a.tid),
+                                Severity::Critical,
+                                ThreatClass::Behavioral,
+                                format!("PID {pid} thread {} start address 0x{:x} in unbacked memory (CreateRemoteThread / Shellcode)", a.tid, a.start_address),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        let _ = pid;
+        Vec::new()
     }
 }
 
@@ -172,9 +377,53 @@ pub fn scan_all() -> Vec<Detection> {
     out
 }
 
+/// Checks if a memory page contains raw x86_64 direct syscall stubs (Hell's Gate / SysWhispers).
+fn find_direct_syscall_stub(bytes: &[u8]) -> bool {
+    if bytes.len() < 12 {
+        return false;
+    }
+    for w in bytes.windows(12) {
+        // Pattern 1: 4c 8b d1 b8 ?? ?? 00 00 0f 05 c3 (mov r10, rcx; mov eax, <ssn>; syscall; ret)
+        if w[0] == 0x4c && w[1] == 0x8b && w[2] == 0xd1 && w[3] == 0xb8 && w[8] == 0x0f && w[9] == 0x05 {
+            return true;
+        }
+        // Pattern 2: 49 89 ca b8 ?? ?? 00 00 0f 05 c3 (mov r10, rcx; mov eax, <ssn>; syscall; ret)
+        if w[0] == 0x49 && w[1] == 0x89 && w[2] == 0xca && w[3] == 0xb8 && w[8] == 0x0f && w[9] == 0x05 {
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_direct_syscall_stub_detection() {
+        // mov r10, rcx; mov eax, 0x18; syscall; ret
+        let stub = [0x4c, 0x8b, 0xd1, 0xb8, 0x18, 0x00, 0x00, 0x00, 0x0f, 0x05, 0xc3, 0x90];
+        assert!(find_direct_syscall_stub(&stub));
+        let innocent = [0x90; 12];
+        assert!(!find_direct_syscall_stub(&innocent));
+    }
+
+    #[test]
+    fn test_amsi_etw_bypass_patch_detection() {
+        assert!(is_known_bypass_patch(&[0xC3])); // ret
+        assert!(is_known_bypass_patch(&[0x31, 0xC0, 0xC3])); // xor eax, eax; ret
+        assert!(is_known_bypass_patch(&[0x33, 0xC0, 0xC3])); // xor eax, eax; ret
+        assert!(is_known_bypass_patch(&[0xB8, 0x57, 0x00, 0x07, 0x80, 0xC3])); // AMSI invalid arg
+        assert!(is_known_bypass_patch(&[0xC2, 0x18, 0x00])); // ret 0x18
+        assert!(!is_known_bypass_patch(&[0x48, 0x89, 0x5C, 0x24, 0x08])); // standard prologue
+    }
+
+    #[test]
+    fn test_jit_process_allowlist() {
+        assert!(is_known_jit_process(Path::new("chrome.exe")));
+        assert!(is_known_jit_process(Path::new("node.exe")));
+        assert!(!is_known_jit_process(Path::new("mimikatz.exe")));
+    }
 
     #[test]
     fn parses_file_backed_region() {

@@ -1,17 +1,19 @@
 import { useEffect, useState } from "react";
-import { ShieldAlert, Puzzle, Network as NetIcon } from "lucide-react";
+import { ShieldAlert, Network as NetIcon, Search, CheckCircle2 } from "lucide-react";
 import {
   api,
   severityColor,
   type NetworkReport,
   type PluginRow,
 } from "@/lib/api";
-import { Badge, Button, Card, SectionTitle, Spinner, StatCard } from "@/components/ui";
+import { Badge, Button, Card, SectionTitle, Spinner } from "@/components/ui";
 
 export default function Network() {
   const [rep, setRep] = useState<NetworkReport | null>(null);
   const [plugins, setPlugins] = useState<PluginRow[]>([]);
   const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState("");
+  const [activeTab, setActiveTab] = useState<"connections" | "findings" | "plugins">("connections");
 
   const load = async () => {
     setBusy(true);
@@ -22,109 +24,209 @@ export default function Network() {
       setBusy(false);
     }
   };
+
   useEffect(() => {
     load();
   }, []);
 
+  const filteredConns = (rep?.connections ?? []).filter(
+    (c) =>
+      c.local.includes(filter) ||
+      c.remote.includes(filter) ||
+      c.state.toLowerCase().includes(filter.toLowerCase()) ||
+      c.protocol.toLowerCase().includes(filter.toLowerCase())
+  );
+
   return (
-    <div>
+    <div className="space-y-6 max-w-6xl">
       <SectionTitle
-        title="Network & Firewall"
-        subtitle="Live connection IDS: C2 / backdoor / Tor indicators and exposed listeners."
+        title="Network & Host Firewall"
+        subtitle="Real-time socket inspection, LOLBin egress defense, and multi-port reconnaissance detection."
         action={
-          <Button variant="primary" onClick={load} disabled={busy}>
-            {busy ? <Spinner /> : <NetIcon size={16} />} Rescan
+          <Button variant="outline" size="sm" onClick={load} disabled={busy}>
+            {busy ? <Spinner /> : <NetIcon size={14} />} Refresh Connections
           </Button>
         }
       />
 
-      <div className="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-3">
-        <StatCard label="Listening sockets" value={rep?.listening ?? 0} icon={<NetIcon size={20} />} />
-        <StatCard label="Established" value={rep?.established ?? 0} />
-        <StatCard
-          label="Network findings"
-          value={rep?.findings.length ?? 0}
-          accent={rep && rep.findings.length > 0 ? "text-warn" : "text-ok"}
-          icon={<ShieldAlert size={20} />}
-        />
+      {/* Metrics Row */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Card className="p-5">
+          <span className="text-xs text-[#64748B] font-medium block">Listening Ports</span>
+          <span className="text-2xl font-extrabold text-[#1E293B] tab-nums mt-1 block">{rep?.listening ?? 0}</span>
+          <span className="text-[11px] text-[#94A3B8]">Bound local endpoints</span>
+        </Card>
+        <Card className="p-5">
+          <span className="text-xs text-[#64748B] font-medium block">Established Sockets</span>
+          <span className="text-2xl font-extrabold text-[#1E293B] tab-nums mt-1 block">{rep?.established ?? 0}</span>
+          <span className="text-[11px] text-[#94A3B8]">Active remote connections</span>
+        </Card>
+        <Card className="p-5">
+          <span className="text-xs text-[#64748B] font-medium block">Intrusion Alerts</span>
+          <span className={`text-2xl font-extrabold tab-nums mt-1 block ${rep && rep.findings.length > 0 ? "text-[#DC2626]" : "text-[#059669]"}`}>
+            {rep?.findings.length ?? 0}
+          </span>
+          <span className="text-[11px] text-[#94A3B8]">C2 & reconnaissance hits</span>
+        </Card>
       </div>
 
-      <Card className="mb-5">
-        <h2 className="mb-3 text-base font-semibold">Intrusion findings</h2>
-        {!rep ? (
-          <p className="text-sm text-muted">Scanning…</p>
-        ) : rep.findings.length === 0 ? (
-          <p className="text-sm text-ok">✓ no suspicious network activity</p>
-        ) : (
-          <div className="space-y-2">
-            {rep.findings.map((f, i) => (
-              <div key={i} className="rounded-lg border border-border bg-black/20 px-3 py-2">
-                <div className="flex items-center gap-2">
-                  <span className={`text-sm font-medium ${severityColor(f.severity)}`}>
-                    [{f.severity_label}]
-                  </span>
-                  <span className="text-sm">{f.names}</span>
-                </div>
-                <div className="mt-0.5 text-xs text-muted">{f.path.toString()}</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
+      {/* Clean Tabs Header */}
+      <div className="flex items-center gap-2 border-b border-[#EAEFF5] pb-3">
+        <button
+          onClick={() => setActiveTab("connections")}
+          className={`px-4 py-2 text-xs font-bold rounded-xl transition-all duration-150 ${
+            activeTab === "connections"
+              ? "bg-[#1E293B] text-white shadow-sm"
+              : "text-[#64748B] hover:text-[#1E293B] hover:bg-[#F1F5F9]"
+          }`}
+        >
+          Active Connections ({rep?.connections.length ?? 0})
+        </button>
+        <button
+          onClick={() => setActiveTab("findings")}
+          className={`px-4 py-2 text-xs font-bold rounded-xl transition-all duration-150 ${
+            activeTab === "findings"
+              ? "bg-[#1E293B] text-white shadow-sm"
+              : "text-[#64748B] hover:text-[#1E293B] hover:bg-[#F1F5F9]"
+          }`}
+        >
+          Intrusion Alerts ({rep?.findings.length ?? 0})
+        </button>
+        <button
+          onClick={() => setActiveTab("plugins")}
+          className={`px-4 py-2 text-xs font-bold rounded-xl transition-all duration-150 ${
+            activeTab === "plugins"
+              ? "bg-[#1E293B] text-white shadow-sm"
+              : "text-[#64748B] hover:text-[#1E293B] hover:bg-[#F1F5F9]"
+          }`}
+        >
+          Network Plugins ({plugins.length})
+        </button>
+      </div>
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <Card>
-          <h2 className="mb-3 text-base font-semibold">Active connections</h2>
-          <div className="max-h-[300px] overflow-y-auto">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-black/40 text-left text-muted backdrop-blur">
-                <tr>
-                  <th className="px-2 py-1.5 font-medium">Proto</th>
-                  <th className="px-2 py-1.5 font-medium">Local</th>
-                  <th className="px-2 py-1.5 font-medium">Remote</th>
-                  <th className="px-2 py-1.5 font-medium">State</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(rep?.connections ?? []).map((c, i) => (
-                  <tr key={i} className="border-t border-border">
-                    <td className="px-2 py-1.5 text-muted">{c.protocol}</td>
-                    <td className="px-2 py-1.5">{c.local}</td>
-                    <td className="px-2 py-1.5 text-muted">{c.remote}</td>
-                    <td className="px-2 py-1.5">
-                      <Badge color={c.state === "LISTEN" ? "accent" : "muted"}>{c.state}</Badge>
-                    </td>
+      {/* Active Tab Views */}
+      {activeTab === "connections" && (
+        <div className="space-y-4">
+          <Card className="p-3.5">
+            <div className="flex items-center gap-2.5 px-2">
+              <Search size={16} className="text-[#94A3B8] shrink-0" />
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Filter by local address, remote IP, port, or state..."
+                className="flex-1 bg-transparent text-xs text-[#1E293B] outline-none placeholder:text-[#94A3B8] font-medium"
+              />
+              {filter && (
+                <button
+                  onClick={() => setFilter("")}
+                  className="text-xs text-[#64748B] hover:text-[#1E293B] font-medium"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </Card>
+
+          <Card className="p-0 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs font-mono">
+                <thead className="bg-[#F8FAFC] text-[#64748B] border-b border-[#EAEFF5]">
+                  <tr>
+                    <th className="px-5 py-3 font-semibold">Proto</th>
+                    <th className="px-5 py-3 font-semibold">Local Address</th>
+                    <th className="px-5 py-3 font-semibold">Remote Address</th>
+                    <th className="px-5 py-3 font-semibold">State</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+                </thead>
+                <tbody className="divide-y divide-[#EAEFF5]">
+                  {filteredConns.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-5 py-10 text-center text-[#64748B] font-sans">
+                        No connections matching filter.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredConns.map((c, i) => (
+                      <tr key={i} className="hover:bg-[#F8FAFC] transition-colors">
+                        <td className="px-5 py-3 uppercase font-bold text-[#1E293B]">{c.protocol}</td>
+                        <td className="px-5 py-3 text-[#1E293B] font-medium">{c.local}</td>
+                        <td className="px-5 py-3 text-[#64748B]">{c.remote || "—"}</td>
+                        <td className="px-5 py-3">
+                          <Badge
+                            color={
+                              c.state === "ESTABLISHED"
+                                ? "ok"
+                                : c.state === "LISTEN"
+                                ? "blue"
+                                : "muted"
+                            }
+                          >
+                            {c.state}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      )}
 
-        <Card>
-          <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">
-            <Puzzle size={18} className="text-accent" /> Plugins
-          </h2>
-          {plugins.length === 0 ? (
-            <p className="text-sm text-muted">
-              No plugins installed. Drop signed plugins in{" "}
-              <code className="text-xs">~/.config/aegis/plugins</code>.
-            </p>
+      {activeTab === "findings" && (
+        <Card className="p-0 overflow-hidden">
+          <div className="px-6 py-4 border-b border-[#EAEFF5] bg-white">
+            <h2 className="text-sm font-bold text-[#1E293B]">Network Intrusion Indicators</h2>
+          </div>
+          {(!rep || rep.findings.length === 0) ? (
+            <div className="p-16 text-center space-y-2">
+              <CheckCircle2 size={36} className="text-[#10B981] mx-auto opacity-80" />
+              <div className="text-sm font-bold text-[#1E293B]">No Malicious Connections Detected</div>
+              <p className="text-xs text-[#64748B] max-w-sm mx-auto">
+                Zero known C2 botnet endpoints, backdoor shells, or LOLBin egress sockets detected.
+              </p>
+            </div>
           ) : (
-            <div className="space-y-2">
-              {plugins.map((p, i) => (
-                <div key={i} className="flex items-center justify-between rounded-lg px-3 py-2">
-                  <span className="text-sm">{p.name}</span>
-                  <Badge color={p.trusted ? "ok" : "danger"}>{p.status}</Badge>
+            <div className="divide-y divide-[#EAEFF5]">
+              {rep.findings.map((f, i) => (
+                <div key={i} className="p-5 flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-sm font-bold text-[#DC2626]">{f.names}</div>
+                    <div className="mt-1 text-xs text-[#475569] font-mono">{f.path.toString()}</div>
+                  </div>
+                  <Badge color="danger">[{f.severity_label}]</Badge>
                 </div>
               ))}
             </div>
           )}
-          <p className="mt-3 text-xs text-muted">
-            Plugins run only when ed25519-signed by a trusted key.
-          </p>
         </Card>
-      </div>
+      )}
+
+      {activeTab === "plugins" && (
+        <Card className="p-0 overflow-hidden">
+          <div className="px-6 py-4 border-b border-[#EAEFF5] bg-white">
+            <h2 className="text-sm font-bold text-[#1E293B]">Installed Network Plugins</h2>
+          </div>
+          {plugins.length === 0 ? (
+            <div className="p-12 text-center text-xs text-[#64748B]">
+              No additional firewall plugins installed in config directory.
+            </div>
+          ) : (
+            <div className="divide-y divide-[#EAEFF5]">
+              {plugins.map((p, i) => (
+                <div key={i} className="p-5 flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-bold text-[#1E293B]">{p.name}</div>
+                    <div className="text-xs text-[#64748B] mt-0.5">Permissions: {p.permissions.join(", ") || "None"}</div>
+                  </div>
+                  <Badge color={p.trusted ? "ok" : "warn"}>{p.trusted ? "Verified" : "Untrusted"}</Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
     </div>
   );
 }

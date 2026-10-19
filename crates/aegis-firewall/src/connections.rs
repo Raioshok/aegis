@@ -33,6 +33,7 @@ pub struct Connection {
     pub remote_port: u16,
     pub state: &'static str,
     pub uid: u32,
+    pub pid: Option<u32>,
     pub inode: u64,
 }
 
@@ -95,10 +96,12 @@ pub fn parse_row(line: &str, protocol: &'static str) -> Option<Connection> {
             "—"
         },
         uid,
+        pid: None,
         inode,
     })
 }
 
+#[allow(dead_code)]
 fn read_table(path: &Path, protocol: &'static str, out: &mut Vec<Connection>) {
     if let Ok(content) = std::fs::read_to_string(path) {
         for line in content.lines().skip(1) {
@@ -111,12 +114,57 @@ fn read_table(path: &Path, protocol: &'static str, out: &mut Vec<Connection>) {
 
 /// Enumerate all TCP/UDP connections (IPv4 + IPv6).
 pub fn all() -> Vec<Connection> {
-    let mut out = Vec::new();
-    read_table(Path::new("/proc/net/tcp"), "tcp", &mut out);
-    read_table(Path::new("/proc/net/tcp6"), "tcp", &mut out);
-    read_table(Path::new("/proc/net/udp"), "udp", &mut out);
-    read_table(Path::new("/proc/net/udp6"), "udp", &mut out);
-    out
+    #[cfg(target_os = "linux")]
+    {
+        let mut out = Vec::new();
+        read_table(Path::new("/proc/net/tcp"), "tcp", &mut out);
+        read_table(Path::new("/proc/net/tcp6"), "tcp", &mut out);
+        read_table(Path::new("/proc/net/udp"), "udp", &mut out);
+        read_table(Path::new("/proc/net/udp6"), "udp", &mut out);
+        out
+    }
+    #[cfg(windows)]
+    {
+        let platform_conns = aegis_platform::default_netfilter().connections();
+        platform_conns
+            .into_iter()
+            .map(|c| {
+                let proto: &'static str = match c.protocol.as_str() {
+                    "udp" => "udp",
+                    _ => "tcp",
+                };
+                let state_str: &'static str = match c.state.as_str() {
+                    "LISTEN" => "LISTEN",
+                    "ESTABLISHED" => "ESTABLISHED",
+                    "SYN_SENT" => "SYN_SENT",
+                    "SYN_RECV" => "SYN_RECV",
+                    "FIN_WAIT1" => "FIN_WAIT1",
+                    "FIN_WAIT2" => "FIN_WAIT2",
+                    "TIME_WAIT" => "TIME_WAIT",
+                    "CLOSE" => "CLOSE",
+                    "CLOSE_WAIT" => "CLOSE_WAIT",
+                    "LAST_ACK" => "LAST_ACK",
+                    "CLOSING" => "CLOSING",
+                    _ => "—",
+                };
+                Connection {
+                    protocol: proto,
+                    local: c.local,
+                    local_port: c.local_port,
+                    remote: c.remote,
+                    remote_port: c.remote_port,
+                    state: state_str,
+                    uid: c.uid,
+                    pid: c.pid,
+                    inode: c.inode,
+                }
+            })
+            .collect()
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        Vec::new()
+    }
 }
 
 #[cfg(test)]

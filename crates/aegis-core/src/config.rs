@@ -28,6 +28,10 @@ impl Default for EngineToggles {
 #[serde(default)]
 pub struct Config {
     pub engines: EngineToggles,
+    /// Shields & modular feature toggles.
+    pub shields: ShieldsConfig,
+    /// Kaspersky-style Game Mode (resource throttling & quiet mode).
+    pub game_mode: GameModeConfig,
     /// Skip files larger than this (bytes). Protects against huge-file DoS.
     pub max_file_size: u64,
     /// Shannon-entropy threshold above which a binary is flagged as packed.
@@ -46,6 +50,50 @@ pub struct Config {
     pub schedule: ScheduleConfig,
     /// Ransomware behavioural-guard settings (daemon).
     pub ransomware: RansomwareSettings,
+}
+
+/// Shields & protection component toggles.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShieldsConfig {
+    pub realtime_filesystem: bool,
+    pub memory_defense: bool,
+    pub network_firewall: bool,
+    pub ransomware_guard: bool,
+    pub cloud_threat_feeds: bool,
+}
+
+impl Default for ShieldsConfig {
+    fn default() -> Self {
+        Self {
+            realtime_filesystem: true,
+            memory_defense: true,
+            network_firewall: true,
+            ransomware_guard: true,
+            cloud_threat_feeds: true,
+        }
+    }
+}
+
+/// Kaspersky-style Gaming Mode (resource throttling & quiet mode during full-screen games).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GameModeConfig {
+    pub enabled: bool,
+    pub auto_detect: bool,
+    pub lower_priority: bool,
+    pub suppress_notifications: bool,
+    pub pause_background_scans: bool,
+}
+
+impl Default for GameModeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_detect: true,
+            lower_priority: true,
+            suppress_notifications: true,
+            pause_background_scans: true,
+        }
+    }
 }
 
 /// Behavioural ransomware-guard configuration (plain data; mapped to the
@@ -138,6 +186,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             engines: EngineToggles::default(),
+            shields: ShieldsConfig::default(),
+            game_mode: GameModeConfig::default(),
             max_file_size: 200 * 1024 * 1024,
             entropy_threshold: 7.2,
             scan_hidden: true,

@@ -23,6 +23,8 @@ pub mod memory;
 pub mod ransomware;
 pub mod response;
 pub mod rootkit;
+pub mod rules;
 pub mod sandbox;
 
 pub use ransomware::{AlertReason, RansomwareAlert, RansomwareConfig, RansomwareGuard};
+pub use rules::{BehaviorRule, BehaviorRuleEngine, MatchCondition};

@@ -8,6 +8,7 @@ description = "Aegis nftables firewall manager and connection inspector"
 
 [dependencies]
 aegis-core.workspace = true
+aegis-platform.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
