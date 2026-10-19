@@ -19,8 +19,8 @@ try {
 
 const GATEWAY_URL = 'http://127.0.0.1:9090';
 const DEFAULT_VMS = [
-    { name: 'Aegis-Lab-Win11', ip: '172.17.61.148', port: 22, user: 'aegislab', pass: 'aegislab', os: 'windows' },
-    { name: 'Aegis-Lab-Ubuntu', ip: '172.17.55.155', port: 22, user: 'aegislab', pass: 'aegislab', os: 'linux' }
+    { name: 'Aegis-Lab-Win11', ip: '172.31.6.209', port: 22, user: 'aegislab', pass: 'aegislab', os: 'windows' },
+    { name: 'Aegis-Lab-Ubuntu', ip: '172.31.6.23', port: 22, user: 'aegislab', pass: 'aegislab', os: 'linux' }
 ];
 
 function checkGateway() {
