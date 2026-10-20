@@ -214,7 +214,7 @@ async fn handle_connection(
             ("200 OK", content)
         }
         ("GET", "/train.sh") => {
-            let content = "#!/usr/bin/env bash\ncurl -sSL http://172.17.48.1:9090/train.py | python3\n";
+            let content = "#!/usr/bin/env bash\ncurl -sSL http://192.168.18.166:9090/train.py | python3\n";
             ("200 OK", content.to_string())
         }
         ("GET", "/api/v1/signatures") => {
