@@ -14,6 +14,7 @@ pub mod engine;
 pub mod hash_engine;
 pub mod hashing;
 pub mod heuristic_engine;
+pub mod ml_engine;
 pub mod orchestrator;
 pub mod updater;
 pub mod yara_engine;
@@ -23,6 +24,10 @@ pub use engine::{Engine, FileContext};
 pub use hash_engine::HashEngine;
 pub use hashing::{digest_file, sha256_hex, Digests};
 pub use heuristic_engine::{shannon_entropy, HeuristicEngine};
+pub use ml_engine::{
+    ByteEntropyHistogram, ByteHistogram, GbdtModel, ImportFeatures, MlEngine, PeFeatures,
+    SectionCharacteristics,
+};
 pub use orchestrator::Scanner;
 pub use updater::{FeedData, FeedManager};
 pub use yara_engine::YaraEngine;
@@ -110,6 +115,9 @@ pub fn default_engines(
     }
     if config.engines.heuristic {
         engines.push(Box::new(HeuristicEngine::new(config.entropy_threshold)));
+    }
+    if config.engines.ml {
+        engines.push(Box::new(MlEngine::default()));
     }
     engines
 }

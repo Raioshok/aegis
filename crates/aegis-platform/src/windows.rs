@@ -436,6 +436,128 @@ impl MemoryInspector for WindowsMemoryInspector {
         }
         Ok(unbacked)
     }
+
+    fn inspect_threads(&self, pid: u32) -> Result<Vec<ThreadAnomaly>> {
+        let regions = self.regions(pid)?;
+        let mut anomalies = Vec::new();
+
+        unsafe {
+            let snap = windows_sys::Win32::System::Diagnostics::ToolHelp::CreateToolhelp32Snapshot(
+                windows_sys::Win32::System::Diagnostics::ToolHelp::TH32CS_SNAPTHREAD,
+                0,
+            );
+            if snap != windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE && !snap.is_null() {
+                let mut te: windows_sys::Win32::System::Diagnostics::ToolHelp::THREADENTRY32 = std::mem::zeroed();
+                te.dwSize = std::mem::size_of::<windows_sys::Win32::System::Diagnostics::ToolHelp::THREADENTRY32>() as u32;
+
+                if windows_sys::Win32::System::Diagnostics::ToolHelp::Thread32First(snap, &mut te) != 0 {
+                    let ntdll = windows_sys::Win32::System::LibraryLoader::GetModuleHandleA(b"ntdll.dll\0".as_ptr());
+                    if !ntdll.is_null() {
+                        let proc_addr = windows_sys::Win32::System::LibraryLoader::GetProcAddress(
+                            ntdll,
+                            b"NtQueryInformationThread\0".as_ptr(),
+                        );
+                        if let Some(func) = proc_addr {
+                            type NtQueryInformationThreadFn = unsafe extern "system" fn(
+                                thread_handle: *mut std::ffi::c_void,
+                                thread_information_class: u32,
+                                thread_information: *mut std::ffi::c_void,
+                                thread_information_length: u32,
+                                return_length: *mut u32,
+                            ) -> i32;
+                            let query_thread: NtQueryInformationThreadFn = std::mem::transmute(func);
+
+                            loop {
+                                if te.th32OwnerProcessID == pid {
+                                    let h_thread = windows_sys::Win32::System::Threading::OpenThread(
+                                        0x0040 | 0x0008,
+                                        0,
+                                        te.th32ThreadID,
+                                    );
+                                    if !h_thread.is_null() && h_thread != windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+                                        let mut start_addr: usize = 0;
+                                        let mut ret_len: u32 = 0;
+                                        let mut is_start_unbacked = false;
+                                        if query_thread(h_thread, 9, &mut start_addr as *mut _ as _, std::mem::size_of::<usize>() as u32, &mut ret_len) == 0 && start_addr > 0 {
+                                            for r in &regions {
+                                                if start_addr >= r.start && start_addr < r.end {
+                                                    if r.is_private && r.is_executable {
+                                                        is_start_unbacked = true;
+                                                    }
+                                                    break;
+                                                }
+                                            }
+                                        }
+
+                                        extern "system" {
+                                            fn GetThreadContext(
+                                                hthread: windows_sys::Win32::Foundation::HANDLE,
+                                                lpcontext: *mut std::ffi::c_void,
+                                            ) -> i32;
+                                        }
+
+                                        #[repr(C, align(16))]
+                                        struct CONTEXT64 {
+                                            p1: [u64; 6],
+                                            context_flags: u32,
+                                            mx_csr: u32,
+                                            seg_cs: u16,
+                                            seg_ds: u16,
+                                            seg_es: u16,
+                                            seg_fs: u16,
+                                            seg_gs: u16,
+                                            seg_ss: u16,
+                                            eflags: u32,
+                                            dr0: u64, dr1: u64, dr2: u64, dr3: u64, dr6: u64, dr7: u64,
+                                            rax: u64, rcx: u64, rdx: u64, rbx: u64, rsp: u64, rbp: u64,
+                                            rsi: u64, rdi: u64, r8: u64, r9: u64, r10: u64, r11: u64,
+                                            r12: u64, r13: u64, r14: u64, r15: u64,
+                                            rip: u64,
+                                        }
+                                        let mut ctx: CONTEXT64 = std::mem::zeroed();
+                                        ctx.context_flags = 0x00100000 | 0x00000002; // CONTEXT_CONTROL
+                                        let mut is_rip_unbacked = false;
+                                        let mut rip: usize = 0;
+                                        if GetThreadContext(h_thread, &mut ctx as *mut _ as _) != 0 {
+                                            rip = ctx.rip as usize;
+                                            if rip > 0 {
+                                                for r in &regions {
+                                                    if rip >= r.start && rip < r.end {
+                                                        if r.is_private && r.is_executable {
+                                                            is_rip_unbacked = true;
+                                                        }
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        if is_start_unbacked || is_rip_unbacked {
+                                            anomalies.push(ThreadAnomaly {
+                                                tid: te.th32ThreadID,
+                                                pid,
+                                                rip,
+                                                start_address: start_addr,
+                                                is_rip_unbacked,
+                                                is_start_unbacked,
+                                            });
+                                        }
+
+                                        windows_sys::Win32::Foundation::CloseHandle(h_thread);
+                                    }
+                                }
+                                if windows_sys::Win32::System::Diagnostics::ToolHelp::Thread32Next(snap, &mut te) == 0 {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                windows_sys::Win32::Foundation::CloseHandle(snap);
+            }
+        }
+        Ok(anomalies)
+    }
 }
 
 // --- Windows NetFilter / Connection Inspection ------------------------
@@ -1573,6 +1695,82 @@ pub fn set_process_resource_mode(game_mode_active: bool) {
             windows_sys::Win32::System::Threading::NORMAL_PRIORITY_CLASS
         };
         windows_sys::Win32::System::Threading::SetPriorityClass(current_process, priority);
+    }
+}
+
+// --- Windows Platform Security (BYOVD & Vulnerable Driver Blocklist) -----
+
+static VULNERABLE_DRIVERS: &[(&str, &str, Option<&str>, &str, &str)] = &[
+    ("rtcore64.sys", "03e0581432f5c8cc727a8aa387f5b69ff84d38d0df6f1226c19c6e960a81e1e9", Some("CVE-2019-16098"), "Micro-Star International", "MSI Afterburner arbitrary kernel read/write/MSR access"),
+    ("rtcore64.sys", "0466dac557ee161503f5dfbd3549f81ec760c3d6c7c4363a21a03e7a3f66aca8", Some("CVE-2019-16098"), "Micro-Star International", "MSI Afterburner RTCore64 variant"),
+    ("rtcore64.sys", "077aa8ff5e01747723b6d24cc8af460a7a00f30cd3bc80e41cc245ceb8305356", Some("CVE-2019-16098"), "Micro-Star International", "MSI Afterburner RTCore64 variant"),
+    ("rtcore64.sys", "0cf6c6c2d231eaf67dfc87561cc9a56ecef89ab4cbfec3d5b035cb24dcbc9db2", Some("CVE-2019-16098"), "Micro-Star International", "MSI Afterburner RTCore64 variant"),
+    ("gdrv.sys", "b64e05b769f06120e7e17ae1515bb26ab78cfcf2f1c1f547c61775432049d4f7", Some("CVE-2018-19320"), "GIGA-BYTE TECHNOLOGY", "GIGABYTE APP Center gdrv.sys arbitrary physical memory mapping"),
+    ("gdrv.sys", "69d3a0e69ddc6c49c2356c12519bfb4b57422f25fc2521c3b17c80d463e272bb", Some("CVE-2018-19320"), "GIGA-BYTE TECHNOLOGY", "GIGABYTE gdrv.sys arbitrary kernel RW"),
+    ("dbutil_2_3.sys", "c8259d4351ae2126284620f5a72e88701e9d3d3b76974db37a89e0fbbf05d452", Some("CVE-2021-21551"), "Dell Inc.", "Dell DBUtil driver privilege escalation & arbitrary memory RW"),
+    ("dbutil_2_3.sys", "099a4c84a51e5e6e30ebff589178ad99e8d7bb680ee11ebf67667bf28be8ed66", Some("CVE-2021-21551"), "Dell Inc.", "Dell DBUtil driver variant"),
+    ("mhyprot2.sys", "046e772ad70094b9f291244246101cfa068e8e7c10b2a6f2366b5398a69e6b36", None, "miHoYo Co., Ltd.", "miHoYo anti-cheat driver abused to terminate security software"),
+    ("procexp.sys", "075de997497262a9d105afeadaaefc6348b25ce0e0126505c24aa9396c251e85", None, "Microsoft Sysinternals", "Vulnerable Process Explorer driver exposing handle duplicate & terminate"),
+    ("procexp.sys", "16a2e578bc8683f17a175480fea4f53c838cfae965f1d4caa47eaf9e0b3415c1", None, "Microsoft Sysinternals", "Vulnerable Process Explorer driver variant"),
+    ("asrdrv.sys", "4bf974f5d3489638a48ee508b4a8cfa0f0262909778ccdd2e871172b71654d89", None, "ASRock Inc.", "ASRock RGB/Utility driver arbitrary port & memory I/O"),
+    ("winring0x64.sys", "e73e970ecab3de849b2824cfcf441e8c783dbad85c7c2b3ad8586c528f804fc9", None, "OpenLibSys", "WinRing0 kernel driver exposing arbitrary MSR & physical memory RW"),
+    ("cpuz141.sys", "501a3e66014e7561849d443e2a731efc1b48b598b9e69c738f654b0fc08a38b1", None, "CPUID", "CPUID vulnerable driver exposing physical memory read"),
+    ("zam64.sys", "e402929da6e11893c5c64c7e63b65fa3a4d493a743b171fcb63b2ad8708cb7bb", None, "Zemana Ltd.", "Zemana driver abused to unregister process callbacks and terminate EDRs"),
+    ("kprocesshacker.sys", "38ff1cf1cf3ef8f9361ad85f403932e60475fb1737be00780486c9944dffaa75", None, "Process Hacker", "KProcessHacker driver exposing full kernel process manipulation"),
+    ("echo.sys", "a3399611db84ad5215f7b4ee79ab0e19488a44ec2572b83491f24d73aa7fc2d0", None, "Echo / Anti-Cheat", "Vulnerable gaming driver abused for BYOVD kernel tampering"),
+];
+
+#[derive(Debug, Default)]
+pub struct WindowsPlatformSecurity;
+
+impl WindowsPlatformSecurity {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl PlatformSecurity for WindowsPlatformSecurity {
+    fn is_driver_hash_blocked(&self, sha256_hex: &str) -> bool {
+        let needle = sha256_hex.to_ascii_lowercase();
+        VULNERABLE_DRIVERS.iter().any(|(_, h, _, _, _)| *h == needle)
+    }
+
+    fn get_vulnerable_driver_info(&self, sha256_hex: &str) -> Option<VulnerableDriverInfo> {
+        let needle = sha256_hex.to_ascii_lowercase();
+        VULNERABLE_DRIVERS
+            .iter()
+            .find(|(_, h, _, _, _)| *h == needle)
+            .map(|(name, sha, cve, vendor, desc)| {
+                VulnerableDriverInfo::new(*name, *sha, *cve, *vendor, *desc)
+            })
+    }
+
+    fn audit_driver_file(&self, path: &Path) -> Result<DriverAuditVerdict> {
+        let bytes = std::fs::read(path).map_err(|e| AegisError::io(path, e))?;
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(&bytes);
+        let hash_hex = format!("{:x}", hasher.finalize());
+
+        if let Some(info) = self.get_vulnerable_driver_info(&hash_hex) {
+            return Ok(DriverAuditVerdict::Blocked {
+                sha256: hash_hex,
+                reason: format!("Known vulnerable driver exploited for BYOVD ({}: {})", info.name, info.description),
+                driver_info: Some(info),
+            });
+        }
+
+        Ok(DriverAuditVerdict::Allowed { sha256: hash_hex })
+    }
+
+    fn verify_driver_load(&self, service_name: &str, image_path: &Path) -> Result<()> {
+        let verdict = self.audit_driver_file(image_path)?;
+        if let DriverAuditVerdict::Blocked { reason, .. } = verdict {
+            return Err(AegisError::Permission(format!(
+                "BYOVD Prevention: driver service '{service_name}' blocked ({reason})"
+            )));
+        }
+        Ok(())
     }
 }
 

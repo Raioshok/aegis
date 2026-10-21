@@ -39,6 +39,28 @@ impl MapRegion {
     pub fn is_anonymous(&self) -> bool {
         self.path.as_deref().map(|p| p.is_empty()).unwrap_or(true)
     }
+    pub fn is_unbacked(&self) -> bool {
+        self.is_anonymous() || self.private
+    }
+    pub fn contains(&self, addr: u64) -> bool {
+        addr >= self.start && addr < self.end
+    }
+}
+
+impl From<&aegis_core::MapRegion> for MapRegion {
+    fn from(r: &aegis_core::MapRegion) -> Self {
+        let readable = r.permissions.starts_with('r');
+        MapRegion {
+            start: r.start as u64,
+            end: r.end as u64,
+            readable,
+            writable: r.is_writable,
+            executable: r.is_executable,
+            private: r.is_private,
+            path: r.pathname.clone(),
+            deleted: false,
+        }
+    }
 }
 
 /// Parse one maps line, e.g.

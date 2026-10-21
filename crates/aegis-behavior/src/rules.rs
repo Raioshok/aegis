@@ -33,6 +33,8 @@ pub enum MatchCondition {
     RegistryHiveSave,
     /// Accessibility backdoor tampering (StickyKeys / Utilman replacement)
     StickyKeysHijack,
+    /// Living-off-the-land binary loading Mockingjay-vulnerable DLLs (e.g. ssh-keygen with msys-2.0.dll)
+    MockingjayTargetLoad,
     /// Parent and child binary name match
     ParentChildMatch { parent: String, child: String },
     /// Custom command line regex pattern
@@ -139,6 +141,13 @@ impl BehaviorRuleEngine {
                 class: ThreatClass::Rootkit,
                 condition: MatchCondition::StickyKeysHijack,
             },
+            BehaviorRule {
+                name: "Behavior.Evasion.Mockingjay".into(),
+                description: "Execution of known Mockingjay vulnerable binary or DLL (RWX abuse without allocation)".into(),
+                severity: Severity::High,
+                class: ThreatClass::Behavioral,
+                condition: MatchCondition::MockingjayTargetLoad,
+            },
         ];
         Self { rules }
     }
@@ -243,6 +252,11 @@ impl BehaviorRuleEngine {
                 MatchCondition::StickyKeysHijack => {
                     (cmdline_lower.contains("sethc.exe") || cmdline_lower.contains("utilman.exe"))
                         && (cmdline_lower.contains("copy") || cmdline_lower.contains("xcopy") || cmdline_lower.contains("move") || cmdline_lower.contains("reg add"))
+                }
+
+                MatchCondition::MockingjayTargetLoad => {
+                    (cmdline_lower.contains("msys-2.0.dll") || exe_lower.contains("msys-2.0.dll"))
+                        || ((exe_name == "ssh-keygen.exe" || exe_name == "ssh-keygen") && cmdline_lower.contains("msys"))
                 }
 
                 MatchCondition::ParentChildMatch { parent, child } => {
@@ -401,5 +415,20 @@ mod tests {
         };
         let d2 = engine.evaluate(&ev2, None);
         assert!(d2.iter().any(|d| d.threat == "Behavior.CredentialTheft.RegistryHiveDump"));
+    }
+
+    #[test]
+    fn detects_mockingjay_target_load() {
+        let engine = BehaviorRuleEngine::default_rules();
+        let ev = ProcessEvent {
+            pid: 8008,
+            ppid: 100,
+            exe: PathBuf::from("ssh-keygen.exe"),
+            cmdline: vec!["ssh-keygen.exe".into(), "-t".into(), "rsa".into(), "-m".into(), "msys-2.0.dll".into()],
+            kind: ProcessEventKind::Exec,
+            timestamp_ms: 8000,
+        };
+        let d = engine.evaluate(&ev, None);
+        assert!(d.iter().any(|x| x.threat == "Behavior.Evasion.Mockingjay"));
     }
 }

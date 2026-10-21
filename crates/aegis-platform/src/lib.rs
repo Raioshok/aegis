@@ -109,6 +109,21 @@ pub fn default_autostart() -> Box<dyn AutoStart> {
     }
 }
 
+pub fn default_platform_security() -> Box<dyn PlatformSecurity> {
+    #[cfg(windows)]
+    {
+        Box::new(WindowsPlatformSecurity::new())
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Box::new(LinuxPlatformSecurity::new())
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        panic!("unsupported platform");
+    }
+}
+
 pub fn is_gaming_active() -> bool {
     #[cfg(windows)]
     {

@@ -11,6 +11,7 @@ pub struct EngineToggles {
     pub hash: bool,
     pub yara: bool,
     pub heuristic: bool,
+    pub ml: bool,
 }
 
 impl Default for EngineToggles {
@@ -19,6 +20,7 @@ impl Default for EngineToggles {
             hash: true,
             yara: true,
             heuristic: true,
+            ml: true,
         }
     }
 }
@@ -241,6 +243,7 @@ mod tests {
     fn defaults_are_sane() {
         let c = Config::default();
         assert!(c.engines.yara);
+        assert!(c.engines.ml);
         assert!(c.max_file_size > 0);
         assert!(c.is_excluded(std::path::Path::new("/proc/1/maps")));
         assert!(!c.is_excluded(std::path::Path::new("/home/user/file")));

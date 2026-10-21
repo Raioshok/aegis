@@ -293,3 +293,33 @@ pub fn is_gaming_or_fullscreen_active() -> bool {
 }
 
 pub fn set_process_resource_mode(_game_mode_active: bool) {}
+
+#[derive(Debug, Default)]
+pub struct LinuxPlatformSecurity;
+
+impl LinuxPlatformSecurity {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl PlatformSecurity for LinuxPlatformSecurity {
+    fn is_driver_hash_blocked(&self, _sha256_hex: &str) -> bool {
+        false
+    }
+
+    fn get_vulnerable_driver_info(&self, _sha256_hex: &str) -> Option<VulnerableDriverInfo> {
+        None
+    }
+
+    fn audit_driver_file(&self, _path: &Path) -> Result<DriverAuditVerdict> {
+        Ok(DriverAuditVerdict::Allowed {
+            sha256: String::new(),
+        })
+    }
+
+    fn verify_driver_load(&self, _service_name: &str, _image_path: &Path) -> Result<()> {
+        Ok(())
+    }
+}
+

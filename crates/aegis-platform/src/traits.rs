@@ -93,3 +93,87 @@ pub trait AutoStart: Send + Sync {
     fn is_enabled(&self) -> bool;
     fn set_enabled(&self, enabled: bool, app_path: &Path) -> Result<()>;
 }
+
+/// Detailed metadata for a known vulnerable driver from LOLDrivers / Microsoft blocklist.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct VulnerableDriverInfo {
+    pub name: String,
+    pub sha256: String,
+    pub cve: Option<String>,
+    pub vendor: String,
+    pub description: String,
+}
+
+impl VulnerableDriverInfo {
+    pub fn new(
+        name: impl Into<String>,
+        sha256: impl Into<String>,
+        cve: Option<impl Into<String>>,
+        vendor: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            sha256: sha256.into().to_ascii_lowercase(),
+            cve: cve.map(|c| c.into()),
+            vendor: vendor.into(),
+            description: description.into(),
+        }
+    }
+}
+
+/// Audit verdict for a driver binary or hash.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DriverAuditVerdict {
+    /// Driver is safe, clean, and not on any blocklist.
+    Allowed {
+        sha256: String,
+    },
+    /// Driver is blocked due to known vulnerability / BYOVD risk.
+    Blocked {
+        sha256: String,
+        reason: String,
+        driver_info: Option<VulnerableDriverInfo>,
+    },
+}
+
+impl DriverAuditVerdict {
+    pub fn is_allowed(&self) -> bool {
+        matches!(self, Self::Allowed { .. })
+    }
+
+    pub fn is_blocked(&self) -> bool {
+        matches!(self, Self::Blocked { .. })
+    }
+
+    pub fn sha256(&self) -> &str {
+        match self {
+            Self::Allowed { sha256 } => sha256,
+            Self::Blocked { sha256, .. } => sha256,
+        }
+    }
+}
+
+/// Platform-level security checks and defenses (BYOVD driver blocking, vulnerability auditing).
+pub trait PlatformSecurity: Send + Sync {
+    /// Check whether a driver hash (SHA-256 hex string, case-insensitive) is present
+    /// in the known vulnerable driver blocklist.
+    fn is_driver_hash_blocked(&self, sha256_hex: &str) -> bool;
+
+    /// Retrieve metadata for a vulnerable driver by its SHA-256 hash if blocklisted.
+    fn get_vulnerable_driver_info(&self, sha256_hex: &str) -> Option<VulnerableDriverInfo>;
+
+    /// Audit a driver file on disk by computing its SHA-256 digest, checking the blocklist,
+    /// and verifying signature authenticity.
+    fn audit_driver_file(&self, path: &Path) -> Result<DriverAuditVerdict>;
+
+    /// Audit a driver image before service load or driver registration.
+    /// Returns Ok(()) if the driver is permitted, or AegisError::Permission if blocked.
+    fn verify_driver_load(&self, service_name: &str, image_path: &Path) -> Result<()>;
+
+    /// Audit registered kernel drivers on the system and return detections for any vulnerable drivers found.
+    fn audit_registered_drivers(&self) -> Vec<Detection> {
+        Vec::new()
+    }
+}
+

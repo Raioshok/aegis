@@ -328,6 +328,7 @@ impl Scanner {
 mod tests {
     use super::*;
     use crate::heuristic_engine::HeuristicEngine;
+    use crate::ml_engine::MlEngine;
 
     #[test]
     fn scans_directory_and_flags_threat() {
@@ -373,6 +374,105 @@ mod tests {
         let scanner = Scanner::new(Config::default(), wl, engines, EventBus::new());
         let (stats, _) = scanner.scan(&dir);
         assert_eq!(stats.threats, 0);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn scans_directory_with_ml_engine_and_flags_malicious_pe() {
+        let dir = std::env::temp_dir().join(format!("aegis-ml-orch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Synthetic malicious PE with UPX sections and high entropy
+        let mut mal_pe = Vec::with_capacity(1024);
+        mal_pe.extend_from_slice(b"MZ");
+        mal_pe.resize(0x3C, 0);
+        mal_pe.extend_from_slice(&0x80u32.to_le_bytes());
+        mal_pe.resize(0x80, 0);
+        mal_pe.extend_from_slice(b"PE\0\0");
+        mal_pe.extend_from_slice(&0x014cu16.to_le_bytes()); // i386
+        mal_pe.extend_from_slice(&2u16.to_le_bytes());      // 2 sections
+        mal_pe.extend_from_slice(&0u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0u32.to_le_bytes());
+        mal_pe.extend_from_slice(&224u16.to_le_bytes());
+        mal_pe.extend_from_slice(&0x0102u16.to_le_bytes());
+        // Optional header
+        mal_pe.extend_from_slice(&0x010Bu16.to_le_bytes());
+        mal_pe.extend_from_slice(&[1, 0]);
+        mal_pe.extend_from_slice(&0x200u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0x200u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0x1000u32.to_le_bytes()); // Entrypoint
+        mal_pe.extend_from_slice(&0x1000u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0x2000u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0x00400000u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0x1000u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0x200u32.to_le_bytes());
+        mal_pe.extend_from_slice(&[4, 0, 0, 0]); // OS version
+        mal_pe.extend_from_slice(&[0, 0, 0, 0]); // Image version
+        mal_pe.extend_from_slice(&[4, 0, 0, 0]); // Subsystem version
+        mal_pe.extend_from_slice(&0u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0x3000u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0x200u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0u32.to_le_bytes());
+        mal_pe.extend_from_slice(&3u16.to_le_bytes());
+        mal_pe.extend_from_slice(&0u16.to_le_bytes());
+        mal_pe.extend_from_slice(&0x100000u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0x1000u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0x100000u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0x1000u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0u32.to_le_bytes());
+        mal_pe.extend_from_slice(&16u32.to_le_bytes());
+        mal_pe.resize(mal_pe.len() + 128, 0); // 16 Data directories
+        // Section 1: UPX0 with W+X (RWX)
+        mal_pe.extend_from_slice(b"UPX0\0\0\0\0");
+        mal_pe.extend_from_slice(&0x1000u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0x1000u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0x200u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0x200u32.to_le_bytes());
+        mal_pe.extend_from_slice(&[0; 12]);
+        mal_pe.extend_from_slice(&0xE000_0020u32.to_le_bytes()); // RWX
+        // Section 2: UPX1
+        mal_pe.extend_from_slice(b"UPX1\0\0\0\0");
+        mal_pe.extend_from_slice(&0x1000u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0x2000u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0x200u32.to_le_bytes());
+        mal_pe.extend_from_slice(&0x400u32.to_le_bytes());
+        mal_pe.extend_from_slice(&[0; 12]);
+        mal_pe.extend_from_slice(&0x4000_0040u32.to_le_bytes());
+        mal_pe.resize(0x200, 0);
+        let high_entropy: Vec<u8> = (0..512).map(|i| ((i * 199 + 37) % 256) as u8).collect();
+        mal_pe.extend_from_slice(&high_entropy);
+        mal_pe.resize(0x600, 0);
+
+        std::fs::write(dir.join("packed_trojan.exe"), &mal_pe).unwrap();
+        std::fs::write(dir.join("normal.txt"), b"just regular notes here").unwrap();
+
+        let engines: Vec<Box<dyn Engine>> = vec![
+            Box::new(HeuristicEngine::default()),
+            Box::new(MlEngine::default()),
+        ];
+        let scanner = Scanner::new(
+            Config::default(),
+            Whitelist::default(),
+            engines,
+            EventBus::new(),
+        );
+
+        let (stats, verdicts) = scanner.scan(&dir);
+        assert_eq!(stats.total_files, 2);
+        assert!(stats.threats >= 1);
+
+        let trojan_verdict = verdicts
+            .iter()
+            .find(|v| v.path.ends_with("packed_trojan.exe"))
+            .expect("packed_trojan.exe verdict not found");
+        assert!(trojan_verdict.is_threat());
+        assert!(trojan_verdict
+            .detections
+            .iter()
+            .any(|d| d.engine == "MachineLearning"));
 
         std::fs::remove_dir_all(&dir).ok();
     }
