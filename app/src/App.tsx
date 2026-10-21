@@ -20,6 +20,8 @@ import {
   Terminal,
   Activity,
   Copy,
+  Search,
+  Bell,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
@@ -132,23 +134,23 @@ function MainShell() {
   return (
     <div
       onContextMenu={handleGlobalContextMenu}
-      className="flex h-full select-none overflow-hidden bg-[#F6F8FB] dark:bg-[#0C0D12] text-[#1E293B] dark:text-white transition-colors"
+      className="app-shell flex h-full select-none overflow-hidden bg-[#F4F7FB] dark:bg-[#080B12] text-[#152033] dark:text-white transition-colors"
     >
       {/* Sidebar with Dark/Light Support */}
-      <aside className="flex w-64 flex-col bg-white dark:bg-[#10121A] border-r border-[#EAEFF5] dark:border-[#212533] px-4 py-6 justify-between transition-colors">
+      <aside className="flex w-[270px] shrink-0 flex-col bg-white dark:bg-[#0D121C] border-r border-[#E5EAF2] dark:border-[#1B2535] px-4 py-5 justify-between transition-colors">
         <div>
           {/* Logo Brand: Minimalist Shield + lowercase aegis */}
-          <div className="flex items-center justify-between px-3 mb-8">
+          <div className="flex items-center justify-between px-2 mb-8">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#1E293B] dark:bg-[#FF7222] text-white shadow-sm">
+              <div className="flex h-10 w-10 items-center justify-center rounded-[14px] bg-[#142033] dark:bg-[#FF7222] text-white shadow-[0_8px_18px_rgba(20,32,51,0.18)]">
                 <ShieldCheck size={20} strokeWidth={2.2} />
               </div>
               <div>
-                <div className="text-xl font-extrabold tracking-tight text-[#1E293B] dark:text-white leading-none">
+                <div className="text-[21px] font-extrabold tracking-[-0.04em] text-[#142033] dark:text-white leading-none">
                   <ShinyText text="aegis" speed={4} />
                 </div>
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-[#FF7222] mt-1">
-                  Security Suite
+                <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-[#8290A5] mt-1">
+                  Endpoint defense
                 </div>
               </div>
             </div>
@@ -168,7 +170,8 @@ function MainShell() {
           </div>
 
           {/* Navigation Menu */}
-          <nav className="flex flex-col gap-1.5">
+          <div className="px-3 mb-2 text-[9px] font-bold uppercase tracking-[0.18em] text-[#9AA6B8]">Command center</div>
+          <nav className="flex flex-col gap-1">
             {NAV.map((n) => {
               const isActive = page === n.id;
               return (
@@ -176,10 +179,10 @@ function MainShell() {
                   key={n.id}
                   onClick={() => setPage(n.id)}
                   className={cn(
-                    "flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-medium transition-all duration-150 active:scale-[0.98]",
+                    "group relative flex items-center justify-between rounded-[11px] px-3.5 py-2.5 text-xs font-medium transition-all duration-150 active:scale-[0.98]",
                     isActive
-                      ? "bg-[#F1F5F9] dark:bg-[#1E293B] text-[#1E293B] dark:text-white font-semibold shadow-sm"
-                      : "text-[#64748B] dark:text-[#8491A2] hover:bg-[#F8FAFC] dark:hover:bg-[#191C26] hover:text-[#1E293B] dark:hover:text-white"
+                      ? "bg-[#EEF3F9] dark:bg-[#172333] text-[#152033] dark:text-white font-semibold shadow-sm before:absolute before:left-0 before:top-2 before:h-5 before:w-1 before:rounded-r-full before:bg-[#FF7222]"
+                      : "text-[#68778D] dark:text-[#91A0B5] hover:bg-[#F7F9FC] dark:hover:bg-[#121B29] hover:text-[#152033] dark:hover:text-white"
                   )}
                 >
                   <div className="flex items-center gap-3">
@@ -224,8 +227,29 @@ function MainShell() {
       </aside>
 
       {/* Main Content Viewport */}
-      <main className="flex-1 overflow-y-auto p-8 bg-[#F6F8FB] dark:bg-[#0C0D12] transition-colors">
-        <div className="max-w-7xl mx-auto">
+      <main className="flex-1 overflow-y-auto bg-[#F4F7FB] dark:bg-[#080B12] transition-colors">
+        <div className="sticky top-0 z-10 flex h-[66px] items-center justify-between border-b border-[#E5EAF2] bg-[#F4F7FB]/90 px-6 backdrop-blur-xl dark:border-[#1B2535] dark:bg-[#080B12]/90 sm:px-8">
+          <div className="flex items-center gap-3 text-xs text-[#8090A5]">
+            <span className="font-semibold text-[#152033] dark:text-white">Aegis EDR</span>
+            <span className="text-[#C4CBD6] dark:text-[#344155]">/</span>
+            <span>{NAV.find((item) => item.id === page)?.label}</span>
+          </div>
+          <div className="flex items-center gap-2 sm:gap-4">
+            <div className="hidden items-center gap-2 rounded-lg border border-[#E0E6EF] bg-white px-3 py-2 text-[11px] text-[#9AA6B8] shadow-sm dark:border-[#1B2535] dark:bg-[#0D121C] sm:flex">
+              <Search size={14} />
+              <span>Search anything</span>
+              <kbd className="ml-3 rounded border border-[#E5EAF2] px-1.5 py-0.5 text-[9px] dark:border-[#273348]">⌘ K</kbd>
+            </div>
+            <div className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] font-semibold text-[#059669] dark:text-[#34D399]">
+              <span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#10B981] opacity-60" /><span className="relative inline-flex h-2 w-2 rounded-full bg-[#10B981]" /></span>
+              <span className="hidden sm:inline">Protection active</span>
+            </div>
+            <button className="rounded-lg p-2 text-[#8090A5] transition-colors hover:bg-white hover:text-[#152033] dark:hover:bg-[#121B29] dark:hover:text-white" title="Notifications">
+              <Bell size={17} />
+            </button>
+          </div>
+        </div>
+        <div className="mx-auto max-w-[1480px] p-6 sm:p-8">
           {page === "dashboard" && (
             <Dashboard
               onNavigateScan={() => setPage("scan")}
