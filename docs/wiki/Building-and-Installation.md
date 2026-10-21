@@ -59,7 +59,28 @@ target/release/aegis
 
 ---
 
-## 4. Running the Test Suite
+## 4. Android Antivirus APK Build Instructions
+
+The Android Antivirus application (`com.aegis.security`) can be compiled, linked, and signed into a standalone `.apk`:
+
+```bash
+# 1. Run automated build & sign pipeline
+bash scripts/build_android_apk.sh
+
+# Artifact output:
+bin/Aegis-Security.apk
+```
+
+The build pipeline performs:
+1. Resource compilation via `aapt`.
+2. Java bytecode compilation with `javac`.
+3. Dalvik bytecode translation via `dx`.
+4. 4-byte boundary memory alignment with `zipalign`.
+5. Cryptographic signature verification with `apksigner` (v1, v2, v3 schemes).
+
+---
+
+## 5. Running the Test Suite
 
 ```bash
 # Run all workspace unit and integration tests (120+ tests)
