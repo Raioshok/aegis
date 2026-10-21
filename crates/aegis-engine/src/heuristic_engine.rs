@@ -271,7 +271,11 @@ impl Engine for HeuristicEngine {
                 }
             }
         } else if is_pe {
-            if let Ok(pe) = goblin::pe::PE::parse(data) {
+            let parsed_pe = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                goblin::pe::PE::parse(data)
+            }));
+
+            if let Ok(Ok(pe)) = parsed_pe {
                 let mut max_raw_end = 0usize;
                 let mut entry_in_exec_section = false;
 

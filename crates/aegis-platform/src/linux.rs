@@ -259,18 +259,25 @@ impl LinuxAutoStart {
     }
 }
 
+fn linux_autostart_path() -> PathBuf {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/root"))
+                .join(".config")
+        })
+        .join("autostart/aegis.desktop")
+}
+
 impl AutoStart for LinuxAutoStart {
     fn is_enabled(&self) -> bool {
-        let p = dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("~/.config"))
-            .join("autostart/aegis.desktop");
-        p.exists()
+        linux_autostart_path().exists()
     }
 
     fn set_enabled(&self, enabled: bool, app_path: &Path) -> Result<()> {
-        let p = dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("~/.config"))
-            .join("autostart/aegis.desktop");
+        let p = linux_autostart_path();
         if enabled {
             if let Some(parent) = p.parent() {
                 let _ = std::fs::create_dir_all(parent);

@@ -703,7 +703,14 @@ impl PeFeatures {
             return None;
         }
 
-        let pe = goblin::pe::PE::parse(data).ok()?;
+        let parsed_pe = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            goblin::pe::PE::parse(data)
+        }));
+        let pe = match parsed_pe {
+            Ok(Ok(p)) => p,
+            _ => return None,
+        };
+
         let byte_histogram = ByteHistogram::extract(data);
         let byte_entropy = ByteEntropyHistogram::extract(data);
         let sections = SectionCharacteristics::extract(&pe, data);

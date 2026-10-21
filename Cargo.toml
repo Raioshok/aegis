@@ -105,7 +105,7 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 strip = true
-panic = "abort"
+panic = "unwind"
 
 [profile.bench]
 lto = "thin"
