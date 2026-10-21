@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { RotateCcw, Trash2, Lock, Search, ShieldCheck } from "lucide-react";
+import { RotateCcw, Trash2, Lock, Search, ShieldCheck, Copy, Shield, FolderOpen } from "lucide-react";
 import { api, fmtBytes, fmtTime, type QuarantineRow } from "@/lib/api";
 import { Button, Card, SectionTitle, Badge } from "@/components/ui";
+import { SpotlightCard, Magnet, CountUp, ShinyText, useContextMenu } from "@/components/reactbits";
 
 export default function Quarantine() {
+  const { showMenu } = useContextMenu();
   const [rows, setRows] = useState<QuarantineRow[]>([]);
   const [filter, setFilter] = useState("");
   const [loading, setLoading] = useState(false);
@@ -48,19 +50,21 @@ export default function Quarantine() {
 
       {/* Summary Metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card className="p-5">
-          <span className="text-xs text-[#64748B] font-medium block">Quarantined Objects</span>
-          <span className="text-2xl font-extrabold text-[#1E293B] tab-nums mt-1 block">{rows.length}</span>
-        </Card>
-        <Card className="p-5">
-          <span className="text-xs text-[#64748B] font-medium block">Vault Volume</span>
-          <span className="text-2xl font-extrabold text-[#1E293B] tab-nums mt-1 block">{fmtBytes(totalBytes)}</span>
-        </Card>
-        <Card className="p-5">
-          <span className="text-xs text-[#64748B] font-medium block">Vault Encryption</span>
-          <span className="text-base font-bold text-[#059669] mt-1 block">ChaCha20-Poly1305</span>
+        <SpotlightCard className="p-5 bg-white dark:bg-[#12141D] border-[#EAEFF5] dark:border-[#1E2230]">
+          <span className="text-xs text-[#64748B] dark:text-slate-400 font-medium block">Quarantined Objects</span>
+          <span className="text-2xl font-extrabold text-[#1E293B] dark:text-white tab-nums mt-1 block">
+            <CountUp to={rows.length} />
+          </span>
+        </SpotlightCard>
+        <SpotlightCard className="p-5 bg-white dark:bg-[#12141D] border-[#EAEFF5] dark:border-[#1E2230]">
+          <span className="text-xs text-[#64748B] dark:text-slate-400 font-medium block">Vault Volume</span>
+          <span className="text-2xl font-extrabold text-[#1E293B] dark:text-white tab-nums mt-1 block">{fmtBytes(totalBytes)}</span>
+        </SpotlightCard>
+        <SpotlightCard className="p-5 bg-white dark:bg-[#12141D] border-[#EAEFF5] dark:border-[#1E2230]">
+          <span className="text-xs text-[#64748B] dark:text-slate-400 font-medium block">Vault Encryption</span>
+          <span className="text-base font-bold text-[#059669] dark:text-emerald-400 mt-1 block">ChaCha20-Poly1305</span>
           <span className="text-[11px] text-[#94A3B8]">DPAPI Machine Key Scope</span>
-        </Card>
+        </SpotlightCard>
       </div>
 
       {/* Filter / Search Bar */}
@@ -106,43 +110,77 @@ export default function Quarantine() {
             No items matching "{filter}".
           </div>
         ) : (
-          <div className="divide-y divide-[#EAEFF5]">
+          <div className="divide-y divide-[#EAEFF5] dark:divide-[#212533]">
             {filtered.map((q) => (
               <div
                 key={q.sha256}
-                className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-[#F8FAFC] transition-colors"
+                onContextMenu={(e) => {
+                  showMenu(e, [
+                    {
+                      label: "Restore to Original Location",
+                      icon: <RotateCcw size={14} className="text-emerald-400" />,
+                      action: () => act(q.sha256, "restore"),
+                    },
+                    {
+                      label: "Permanently Purge",
+                      icon: <Trash2 size={14} className="text-red-400" />,
+                      danger: true,
+                      action: () => act(q.sha256, "delete"),
+                    },
+                    {
+                      label: "Copy SHA-256 Digest",
+                      icon: <Copy size={14} className="text-slate-400" />,
+                      action: () => navigator.clipboard.writeText(q.sha256),
+                    },
+                    {
+                      label: "Copy Original Path",
+                      icon: <FolderOpen size={14} className="text-slate-400" />,
+                      action: () => navigator.clipboard.writeText(q.original_path),
+                    },
+                    {
+                      label: "Add Path to Allowlist",
+                      icon: <Shield size={14} className="text-sky-400" />,
+                      action: () => api.addWhitelist(q.original_path, `Quarantine restored: ${q.threat}`).catch(() => {}),
+                    },
+                  ]);
+                }}
+                className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-[#F8FAFC] dark:hover:bg-[#1A1E2B] transition-colors cursor-context-menu"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2.5">
-                    <span className="font-bold text-sm text-[#DC2626]">{q.threat}</span>
-                    <span className="text-xs text-[#64748B] font-mono tab-nums">{fmtBytes(q.size)}</span>
+                    <span className="font-bold text-sm text-[#DC2626] dark:text-red-400">{q.threat}</span>
+                    <span className="text-xs text-[#64748B] dark:text-slate-400 font-mono tab-nums">{fmtBytes(q.size)}</span>
                   </div>
 
-                  <div className="mt-1 font-mono text-xs text-[#1E293B] truncate" title={q.original_path}>
+                  <div className="mt-1 font-mono text-xs text-[#1E293B] dark:text-slate-200 truncate" title={q.original_path}>
                     {q.original_path}
                   </div>
 
                   <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[11px] text-[#94A3B8] font-mono">
                     <span>Isolated: {fmtTime(q.quarantined_at)}</span>
-                    <span className="truncate max-w-xs text-[#64748B]">SHA256: {q.sha256}</span>
+                    <span className="truncate max-w-xs text-[#64748B] dark:text-slate-400">SHA256: {q.sha256}</span>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => act(q.sha256, "restore")}
-                  >
-                    <RotateCcw size={13} /> Restore
-                  </Button>
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={() => act(q.sha256, "delete")}
-                  >
-                    <Trash2 size={13} /> Purge
-                  </Button>
+                  <Magnet padding={40} magnetStrength={3}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => act(q.sha256, "restore")}
+                    >
+                      <RotateCcw size={13} /> Restore
+                    </Button>
+                  </Magnet>
+                  <Magnet padding={40} magnetStrength={3}>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => act(q.sha256, "delete")}
+                    >
+                      <Trash2 size={13} /> Purge
+                    </Button>
+                  </Magnet>
                 </div>
               </div>
             ))}

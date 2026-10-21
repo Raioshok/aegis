@@ -149,6 +149,22 @@ impl<'a> ScanRepository<'a> {
             .map_err(|e| AegisError::Storage(e.to_string()))?;
         Ok((scans, files, threats))
     }
+
+    /// Delete a single threat event by its ID.
+    pub fn delete_threat(&self, id: i64) -> Result<()> {
+        let conn = self.conn.lock().expect("db poisoned");
+        conn.execute("DELETE FROM threats WHERE id = ?1", params![id])
+            .map_err(|e| AegisError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Clear all historical threat events.
+    pub fn clear_threats(&self) -> Result<()> {
+        let conn = self.conn.lock().expect("db poisoned");
+        conn.execute("DELETE FROM threats", [])
+            .map_err(|e| AegisError::Storage(e.to_string()))?;
+        Ok(())
+    }
 }
 
 fn collect<T>(

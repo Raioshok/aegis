@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import { Radar, Cpu, ShieldCheck, AlertTriangle, Play, Activity, EyeOff, FileCode2, GitBranch, Bot, Skull } from "lucide-react";
+import { Radar, Cpu, ShieldCheck, AlertTriangle, Play, Activity, EyeOff, FileCode2, GitBranch, Bot, Skull, Copy } from "lucide-react";
 import { api, severityColor, type ThreatRow, type LineageAlertDto } from "@/lib/api";
 import { Button, Card, SectionTitle, Badge, Spinner } from "@/components/ui";
+import { SpotlightCard, Magnet, DecryptedText, useContextMenu } from "@/components/reactbits";
 
 function Findings({ rows }: { rows: ThreatRow[] }) {
   if (rows.length === 0)
@@ -32,6 +33,7 @@ function Findings({ rows }: { rows: ThreatRow[] }) {
 }
 
 export default function Behavior() {
+  const { showMenu } = useContextMenu();
   const [rootkit, setRootkit] = useState<ThreatRow[] | null>(null);
   const [memory, setMemory] = useState<ThreatRow[] | null>(null);
   const [lineageAlerts, setLineageAlerts] = useState<LineageAlertDto[]>([]);
@@ -97,7 +99,26 @@ export default function Behavior() {
             {lineageAlerts.map((a) => (
               <div
                 key={a.alert_id}
-                className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl bg-white border border-[#FCA5A5] font-mono text-xs"
+                onContextMenu={(e) => {
+                  showMenu(e, [
+                    {
+                      label: `Terminate Process (PID ${a.child_pid})`,
+                      icon: <Skull size={14} className="text-red-400" />,
+                      danger: true,
+                      action: () => handleKill(a.child_pid),
+                    },
+                    {
+                      label: "Copy Commandline",
+                      icon: <Copy size={14} className="text-slate-400" />,
+                      action: () => navigator.clipboard.writeText(a.child_cmdline),
+                    },
+                    {
+                      label: `Copy Parent Process (${a.parent_name})`,
+                      action: () => navigator.clipboard.writeText(`${a.parent_name} (PID ${a.parent_pid})`),
+                    },
+                  ]);
+                }}
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl bg-white dark:bg-[#12141D] border border-[#FCA5A5] dark:border-red-900/40 font-mono text-xs cursor-context-menu hover:border-red-500 transition-colors"
               >
                 <div className="space-y-1">
                   <div className="flex items-center gap-2 font-bold text-[#DC2626]">
