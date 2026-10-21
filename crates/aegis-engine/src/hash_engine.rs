@@ -14,6 +14,8 @@ pub struct HashEngine {
     hashes: Vec<[u8; 32]>,
 }
 
+const BUNDLED_MALWARE_HASHES: &str = include_str!("../../../rules/malware_hashes.txt");
+
 impl HashEngine {
     /// Build from an iterator of hex digests.
     pub fn from_hashes<I, S>(iter: I) -> Self
@@ -27,7 +29,8 @@ impl HashEngine {
             if s.is_empty() || s.starts_with('#') {
                 continue;
             }
-            if let Ok(bytes) = hex::decode(s) {
+            let hex_part = s.split_whitespace().next().unwrap_or("");
+            if let Ok(bytes) = hex::decode(hex_part) {
                 if let Ok(arr) = bytes.try_into() {
                     hashes.push(arr);
                 }
@@ -42,31 +45,16 @@ impl HashEngine {
     pub fn from_file(path: &Path) -> Self {
         match std::fs::read_to_string(path) {
             Ok(text) => Self::from_hashes(text.lines()),
-            Err(_) => Self::default(),
+            Err(_) => Self::with_builtin(),
         }
     }
 
-    /// Seed with a minimal built-in set so a fresh install still catches the
-    /// industry-standard EICAR test file and high-profile verified threats by hash.
+    /// Seed with built-in verified threat hashes and the EICAR test signature.
     pub fn with_builtin() -> Self {
-        Self::from_hashes([
-            // EICAR standard antivirus test file (68-byte canonical form)
-            "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f",
-            // Trojan.MEMZ (Destructive payload)
-            "a3d5715a81f2fbeb5f76c88c9c21eeee87142909716472f911ff6950c790c24d",
-            // Spyware.HawkEye (Keylogger/Credential stealer)
-            "1dacdc296fd6ef6ba817b184cce9901901c47c01d849adfa4222bfabfed61838",
-            // Ransomware.Cerber5
-            "b3e1e9d97d74c416c2a30dd11858789af5554cf2de62f577c13944a19623777d",
-            // Ransomware.AnteFrigus
-            "3cb061bd1c9326ec12d3b5f540d425730245472b72e5295f52b53b82ea03cb68",
-            // Virus.Macro.Melissa
-            "554701bc874da646285689df79e5002b3b1a1f76daf705bea9586640026697ca",
-            // Virus.DOS.MadMan
-            "17d81134a5957fb758b9d69a90b033477a991c8b0f107d9864dc790ca37e6a23",
-            // Ransomware.CryptoWall
-            "45317968759d3e37282ceb75149f627d648534c5b4685f6da3966d8f6fca662d",
-        ])
+        let eicar = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f";
+        let mut lines: Vec<&str> = vec![eicar];
+        lines.extend(BUNDLED_MALWARE_HASHES.lines());
+        Self::from_hashes(lines)
     }
 
     pub fn len(&self) -> usize {

@@ -34,6 +34,8 @@ pub use yara_engine::YaraEngine;
 
 /// The baseline YARA rules bundled into the binary (see `rules/aegis_base.yar`).
 pub const BUNDLED_YARA: &str = include_str!("../../../rules/aegis_base.yar");
+pub const BUNDLED_YARA_DROPPERS: &str = include_str!("../../../rules/droppers_and_cradles.yar");
+pub const BUNDLED_YARA_RANSOM: &str = include_str!("../../../rules/ransomware_and_rats.yar");
 
 /// Scan an in-memory script/macro buffer received from the Windows AMSI provider
 /// or an in-memory script evaluator. Returns the most severe detection if a threat is matched.
@@ -90,7 +92,11 @@ pub fn default_engines(
     }
     if config.engines.yara {
         // Compile bundled rules first, then any user rules directory.
-        let mut sources: Vec<String> = vec![BUNDLED_YARA.to_string()];
+        let mut sources: Vec<String> = vec![
+            BUNDLED_YARA.to_string(),
+            BUNDLED_YARA_DROPPERS.to_string(),
+            BUNDLED_YARA_RANSOM.to_string(),
+        ];
         if user_rules_dir.exists() {
             for entry in walkdir::WalkDir::new(user_rules_dir)
                 .into_iter()

@@ -70,6 +70,7 @@ dependencies = [
 name = "aegis-engine"
 version = "0.1.0"
 dependencies = [
+ "aegis-android",
  "aegis-core",
  "aegis-platform",
  "goblin",

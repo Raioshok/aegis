@@ -39,6 +39,12 @@ pub fn scan_android_file(path: &std::path::Path) -> Result<ApkReport, String> {
     ApkScanner::scan_bytes(filename, &data)
 }
 
+/// Scan an Android APK or DEX and return a JSON serialized report string.
+pub fn scan_android_json(path: &std::path::Path) -> Result<String, String> {
+    let rep = scan_android_file(path)?;
+    serde_json::to_string(&rep).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

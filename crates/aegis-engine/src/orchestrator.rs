@@ -228,6 +228,28 @@ impl Scanner {
             detections.extend(engine.scan(&ctx));
         }
 
+        // 5b. Android APK / DEX detection engine delegation
+        let path_str = path.to_string_lossy().to_ascii_lowercase();
+        if path_str.ends_with(".apk") || path_str.ends_with(".dex") {
+            if let Ok(apk_rep) = aegis_android::scan_android_file(path) {
+                if apk_rep.overall_risk_score >= 35 || !apk_rep.threats.is_empty() {
+                    let sev = if apk_rep.overall_risk_score >= 70 {
+                        aegis_core::Severity::Critical
+                    } else {
+                        aegis_core::Severity::Medium
+                    };
+                    let threat_name = apk_rep.threats.first().cloned().unwrap_or_else(|| "Android.Malware".to_string());
+                    detections.push(Detection::new(
+                        "Android",
+                        format!("Android.{}", threat_name),
+                        sev,
+                        aegis_core::ThreatClass::Heuristic,
+                        format!("Android APK/DEX threat: {} (risk score: {})", apk_rep.threats.join(", "), apk_rep.overall_risk_score),
+                    ));
+                }
+            }
+        }
+
         // If it was path whitelisted, but matches a known-bad hash signature, flag it!
         let has_hash_signature = detections.iter().any(|d| d.engine == "Hash" && d.severity >= aegis_core::Severity::High);
 

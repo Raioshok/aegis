@@ -24,6 +24,7 @@ memmap2.workspace = true
 goblin.workspace = true
 hex = "0.4"
 aegis-platform.workspace = true
+aegis-android.workspace = true
 
 [dev-dependencies]
 criterion = "0.5"

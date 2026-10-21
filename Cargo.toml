@@ -99,6 +99,7 @@ aegis-plugin = { path = "crates/aegis-plugin" }
 aegis-optimize = { path = "crates/aegis-optimize" }
 aegis-ipc = { path = "crates/aegis-ipc" }
 aegis-daemon = { path = "crates/aegis-daemon" }
+aegis-android = { path = "crates/aegis-android" }
 
 [profile.release]
 opt-level = 3

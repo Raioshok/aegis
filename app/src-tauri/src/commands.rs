@@ -1053,9 +1053,9 @@ pub async fn deploy_ransomware_honeypot() -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn scan_android_package(path: String) -> Result<aegis_android::ApkReport, String> {
+pub async fn scan_android_package(path: String) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
-        aegis_android::scan_android_file(std::path::Path::new(&path))
+        aegis_android::scan_android_json(std::path::Path::new(&path))
     })
     .await
     .map_err(|e| e.to_string())?

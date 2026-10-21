@@ -205,7 +205,10 @@ export const api = {
   toggleGameMode: (enabled: boolean) => invoke<GameModeStatus>("toggle_game_mode", { enabled }),
   getScanProgress: () => invoke<ScanProgress>("get_scan_progress"),
   getSmartScanTarget: () => invoke<string>("get_smart_scan_target"),
-  scanAndroidPackage: (path: string) => invoke<ApkReport>("scan_android_package", { path }),
+  scanAndroidPackage: async (path: string): Promise<ApkReport> => {
+    const raw = await invoke<string>("scan_android_package", { path });
+    return JSON.parse(raw);
+  },
   getProcessDag: () => invoke<ProcessDagSnapshot>("get_process_dag_snapshot"),
   getLineageAlerts: () => invoke<LineageAlertDto[]>("get_process_lineage_alerts"),
 };
