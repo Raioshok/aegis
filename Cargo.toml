@@ -1,8 +1,5 @@
 [workspace]
 resolver = "2"
-# The Tauri desktop app (app/src-tauri) is its own package with a Tauri-specific
-# build profile, so it is excluded from the library workspace.
-exclude = ["app"]
 members = [
     "crates/aegis-core",
     "crates/aegis-platform",
@@ -19,6 +16,7 @@ members = [
     "crates/aegis-daemon",
     "crates/aegis-cli",
     "crates/aegis-android",
+    "crates/aegis-gui",
 ]
 default-members = [
     "crates/aegis-core",
@@ -35,6 +33,7 @@ default-members = [
     "crates/aegis-daemon",
     "crates/aegis-cli",
     "crates/aegis-android",
+    "crates/aegis-gui",
 ]
 
 [workspace.package]

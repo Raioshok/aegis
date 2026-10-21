@@ -1,0 +1,34 @@
+[package]
+name = "aegis-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Aegis native desktop GUI application in 100% pure Rust"
+
+[[bin]]
+name = "aegis-gui"
+path = "src/main.rs"
+
+[dependencies]
+aegis-core.workspace = true
+aegis-engine.workspace = true
+aegis-storage.workspace = true
+aegis-quarantine.workspace = true
+aegis-behavior.workspace = true
+aegis-firewall.workspace = true
+aegis-network.workspace = true
+aegis-optimize.workspace = true
+aegis-ipc.workspace = true
+aegis-android.workspace = true
+
+eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }
+egui = "0.29"
+rfd = "0.15"
+tokio = { workspace = true, features = ["full"] }
+tracing.workspace = true
+tracing-subscriber = "0.3"
+chrono = "0.4"
+walkdir.workspace = true
+sha2.workspace = true
+hex = "0.4"
