@@ -13,6 +13,7 @@ import {
   Bot,
   Terminal,
   ShieldAlert,
+  Activity,
 } from "lucide-react";
 import {
   api,
@@ -22,6 +23,7 @@ import {
   type ProcessTreeNodeDto,
 } from "@/lib/api";
 import { Badge, Button, Card, SectionTitle, Spinner } from "@/components/ui";
+import { SwarmGraphCanvas } from "@/components/swarm/SwarmGraphCanvas";
 
 function TreeNode({
   node,
@@ -114,7 +116,7 @@ function TreeNode({
 export default function Processes() {
   const [list, setList] = useState<ProcessItem[]>([]);
   const [dagSnapshot, setDagSnapshot] = useState<ProcessDagSnapshot | null>(null);
-  const [viewMode, setViewMode] = useState<"table" | "tree">("tree");
+  const [viewMode, setViewMode] = useState<"table" | "tree" | "swarm">("swarm");
   const [filter, setFilter] = useState("");
   const [busy, setBusy] = useState(false);
   const [inspectPid, setInspectPid] = useState<number | null>(null);
@@ -183,13 +185,24 @@ export default function Processes() {
         subtitle="Directed Acyclic Graph (DAG) process lineage tracking, AI Agent context auditing, and in-memory injection forensic analysis."
         action={
           <div className="flex items-center gap-2">
-            <div className="flex items-center rounded-xl bg-[#F1F5F9] p-1 border border-[#EAEFF5]">
+            <div className="flex items-center rounded-xl bg-[#F1F5F9] dark:bg-[#1A1D27] p-1 border border-[#EAEFF5] dark:border-[#212533]">
+              <button
+                onClick={() => setViewMode("swarm")}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                  viewMode === "swarm"
+                    ? "bg-[#FF7222] text-white shadow-sm font-bold"
+                    : "text-[#64748B] dark:text-[#94A3B8] hover:text-[#1E293B] dark:hover:text-white"
+                }`}
+              >
+                <Activity size={13} />
+                Swarm Graph
+              </button>
               <button
                 onClick={() => setViewMode("tree")}
                 className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
                   viewMode === "tree"
-                    ? "bg-white text-[#1E293B] shadow-sm font-bold"
-                    : "text-[#64748B] hover:text-[#1E293B]"
+                    ? "bg-white dark:bg-[#12141D] text-[#1E293B] dark:text-white shadow-sm font-bold"
+                    : "text-[#64748B] dark:text-[#94A3B8] hover:text-[#1E293B] dark:hover:text-white"
                 }`}
               >
                 <GitBranch size={13} />
@@ -199,8 +212,8 @@ export default function Processes() {
                 onClick={() => setViewMode("table")}
                 className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
                   viewMode === "table"
-                    ? "bg-white text-[#1E293B] shadow-sm font-bold"
-                    : "text-[#64748B] hover:text-[#1E293B]"
+                    ? "bg-white dark:bg-[#12141D] text-[#1E293B] dark:text-white shadow-sm font-bold"
+                    : "text-[#64748B] dark:text-[#94A3B8] hover:text-[#1E293B] dark:hover:text-white"
                 }`}
               >
                 <TableIcon size={13} />
@@ -245,7 +258,17 @@ export default function Processes() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2 p-0 overflow-hidden">
           <div className="max-h-[620px] overflow-y-auto">
-            {viewMode === "tree" ? (
+            {viewMode === "swarm" ? (
+              <div className="p-2">
+                <SwarmGraphCanvas
+                  nodesData={list}
+                  treesData={dagSnapshot?.trees ?? []}
+                  selectedPid={inspectPid}
+                  onSelectPid={handleInspect}
+                  onKillPid={handleKill}
+                />
+              </div>
+            ) : viewMode === "tree" ? (
               <div className="p-4 space-y-1">
                 {dagSnapshot?.trees && dagSnapshot.trees.length > 0 ? (
                   dagSnapshot.trees.map((t) => (
