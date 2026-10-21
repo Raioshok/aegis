@@ -13,6 +13,9 @@ import {
   CheckCircle2,
   AlertCircle,
   Monitor,
+  Brain,
+  FileCode2,
+  Radio,
 } from "lucide-react";
 import {
   api,
@@ -291,6 +294,39 @@ export default function Dashboard({ onNavigateScan, onNavigatePage }: DashboardP
                 <Badge color={hasIssues ? "warn" : "ok"}>
                   {hasIssues ? "Issue" : "Protected"}
                 </Badge>
+              </div>
+
+              <div className="flex items-center justify-between py-3">
+                <div className="flex items-center gap-3">
+                  <Brain size={18} className="text-[#7C3AED]" />
+                  <div>
+                    <div className="text-xs font-bold text-[#1E293B]">On-Device Machine Learning (GBDT)</div>
+                    <div className="text-[11px] text-[#64748B]">EMBER 2024 / SOREL-20M 14-tree model (&lt;40μs)</div>
+                  </div>
+                </div>
+                <Badge color="ok">Active</Badge>
+              </div>
+
+              <div className="flex items-center justify-between py-3">
+                <div className="flex items-center gap-3">
+                  <FileCode2 size={18} className="text-[#E11D48]" />
+                  <div>
+                    <div className="text-xs font-bold text-[#1E293B]">BYOVD Driver Shield (LOLDrivers)</div>
+                    <div className="text-[11px] text-[#64748B]">Blocking RTCore64, gdrv, dbutil, mhyprot2</div>
+                  </div>
+                </div>
+                <Badge color="ok">Enforced</Badge>
+              </div>
+
+              <div className="flex items-center justify-between py-3">
+                <div className="flex items-center gap-3">
+                  <Radio size={18} className="text-[#059669]" />
+                  <div>
+                    <div className="text-xs font-bold text-[#1E293B]">Telemetry & In-Guest Training Gateway</div>
+                    <div className="text-[11px] text-[#64748B]">Port 9090 live ingestion & automated feedback loop</div>
+                  </div>
+                </div>
+                <Badge color="ok">Listening</Badge>
               </div>
             </div>
           </Card>

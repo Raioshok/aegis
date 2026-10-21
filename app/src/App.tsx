@@ -16,6 +16,7 @@ import {
   Sun,
   Moon,
   Smartphone,
+  FileCheck2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
@@ -31,6 +32,7 @@ import Optimize from "@/pages/Optimize";
 import Processes from "@/pages/Processes";
 import Settings from "@/pages/Settings";
 import AndroidScanner from "@/pages/AndroidScanner";
+import Vulnerabilities from "@/pages/Vulnerabilities";
 
 export type PageId =
   | "dashboard"
@@ -42,6 +44,7 @@ export type PageId =
   | "quarantine"
   | "behavior"
   | "network"
+  | "vulnerabilities"
   | "optimize"
   | "settings";
 
@@ -78,6 +81,7 @@ export default function App() {
     { id: "quarantine", label: "Quarantine Vault", icon: <Lock size={18} /> },
     { id: "behavior", label: "Behavior Guard", icon: <Radar size={18} /> },
     { id: "network", label: "Network Firewall", icon: <Network size={18} /> },
+    { id: "vulnerabilities", label: "Hardening & BYOVD", icon: <FileCheck2 size={18} /> },
     { id: "optimize", label: "System Tune-Up", icon: <Rocket size={18} /> },
     { id: "settings", label: "Shields & Settings", icon: <Sliders size={18} /> },
   ];
@@ -202,6 +206,7 @@ export default function App() {
           {page === "quarantine" && <Quarantine />}
           {page === "behavior" && <Behavior />}
           {page === "network" && <NetworkPage />}
+          {page === "vulnerabilities" && <Vulnerabilities />}
           {page === "optimize" && <Optimize />}
           {page === "settings" && <Settings />}
         </div>

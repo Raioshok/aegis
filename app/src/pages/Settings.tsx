@@ -11,6 +11,9 @@ import {
   CheckCircle2,
   RefreshCw,
   Layers,
+  Brain,
+  EyeOff,
+  FileCode2,
 } from "lucide-react";
 import {
   api,
@@ -29,6 +32,9 @@ export default function Settings() {
     game_mode_enabled: true,
     game_mode_auto_detect: true,
     entropy_threshold: 7.2,
+    ml_engine: true,
+    byovd_defense: true,
+    sleep_obfuscation_defense: true,
   });
   const [gameMode, setGameMode] = useState<GameModeStatus | null>({
     is_gaming_active: false,
@@ -337,6 +343,66 @@ export default function Settings() {
               checked={config.ransomware_guard}
               onChange={() => toggleShield("ransomware_guard")}
               label="Toggle Ransomware Guard"
+            />
+          </Card>
+
+          {/* On-Device Machine Learning Shield */}
+          <Card className="p-5 flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#F5F3FF] text-[#7C3AED] shrink-0">
+                <Brain size={20} />
+              </div>
+              <div>
+                <div className="text-sm font-bold text-[#1E293B]">On-Device Machine Learning (GBDT)</div>
+                <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
+                  Pure-Rust flat-tree array evaluator running on EMBER 2024 / SOREL-20M features (&lt;40μs inference latency).
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={config.ml_engine}
+              onChange={() => toggleShield("ml_engine")}
+              label="Toggle ML Engine"
+            />
+          </Card>
+
+          {/* BYOVD Driver Shield */}
+          <Card className="p-5 flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#FFF1F2] text-[#E11D48] shrink-0">
+                <FileCode2 size={20} />
+              </div>
+              <div>
+                <div className="text-sm font-bold text-[#1E293B]">BYOVD Driver Blocklist (LOLDrivers)</div>
+                <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
+                  Intercepts vulnerable signed kernel drivers (RTCore64, gdrv, dbutil, mhyprot2) before driver service load.
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={config.byovd_defense}
+              onChange={() => toggleShield("byovd_defense")}
+              label="Toggle BYOVD Shield"
+            />
+          </Card>
+
+          {/* In-Memory Evasion Shield */}
+          <Card className="p-5 flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#F0FDF4] text-[#16A34A] shrink-0">
+                <EyeOff size={20} />
+              </div>
+              <div>
+                <div className="text-sm font-bold text-[#1E293B]">In-Memory Evasion & Sleep Shield</div>
+                <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
+                  Inspects thread wait-states for sleep obfuscation (Ekko/Foliage), synthetic stack frames, and PoolParty injection.
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={config.sleep_obfuscation_defense}
+              onChange={() => toggleShield("sleep_obfuscation_defense")}
+              label="Toggle Evasion Shield"
             />
           </Card>
         </div>

@@ -204,6 +204,9 @@ export interface ProtectionConfig {
   game_mode_enabled: boolean;
   game_mode_auto_detect: boolean;
   entropy_threshold: number;
+  ml_engine: boolean;
+  byovd_defense: boolean;
+  sleep_obfuscation_defense: boolean;
 }
 
 export interface GameModeStatus {
