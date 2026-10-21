@@ -26,6 +26,7 @@ import {
 } from "@/lib/api";
 import { Card, Button, Badge, StatusHero, StatCard } from "@/components/ui";
 import { useStaggerEnter } from "@/lib/motion";
+import { SpotlightCard, Magnet, CountUp, ShinyText, DecryptedText } from "@/components/reactbits";
 
 interface DashboardProps {
   onNavigateScan: () => void;
@@ -82,14 +83,16 @@ export default function Dashboard({ onNavigateScan, onNavigatePage }: DashboardP
             {busy ? "Auditing..." : "Refresh"}
           </Button>
 
-          <Button
-            variant="primary"
-            size="md"
-            onClick={onNavigateScan}
-          >
-            <ScanLine size={15} />
-            <span>Start Smart Scan</span>
-          </Button>
+          <Magnet padding={50} magnetStrength={4}>
+            <Button
+              variant="primary"
+              size="md"
+              onClick={onNavigateScan}
+            >
+              <ScanLine size={15} />
+              <span>Start Smart Scan</span>
+            </Button>
+          </Magnet>
         </div>
       </div>
 
@@ -106,38 +109,43 @@ export default function Dashboard({ onNavigateScan, onNavigatePage }: DashboardP
         />
       </div>
 
-      {/* Type-First High-Density Metric Strip (taste-skill §5: KPIs are type, not tiles) */}
+      {/* Type-First High-Density Metric Strip with ReactBits Spotlight & CountUp */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="stagger-card">
-          <StatCard
-            label="Total Files Inspected"
-            value={d?.files?.toLocaleString() ?? "1,842"}
-            detail="Zero-copy mmap2"
-          />
+          <SpotlightCard className="p-4 bg-white dark:bg-[#12141D] border-[#EAEFF5] dark:border-[#1E2230]">
+            <div className="text-[11px] font-mono text-[#64748B] dark:text-slate-400">Total Files Inspected</div>
+            <div className="mt-1 text-2xl font-bold font-mono text-[#1E293B] dark:text-white">
+              <CountUp to={d?.files ?? 1842} />
+            </div>
+            <div className="mt-1 text-[11px] text-slate-500">Zero-copy mmap2</div>
+          </SpotlightCard>
         </div>
         <div className="stagger-card">
-          <StatCard
-            label="Active In-Memory Threats"
-            value={threatCount}
-            detail={threatCount === 0 ? "Clean state" : "Requires triage"}
-            accent={threatCount > 0 ? "text-[#DC2626]" : "text-[#059669]"}
-          />
+          <SpotlightCard className="p-4 bg-white dark:bg-[#12141D] border-[#EAEFF5] dark:border-[#1E2230]">
+            <div className="text-[11px] font-mono text-[#64748B] dark:text-slate-400">Active Threats</div>
+            <div className={`mt-1 text-2xl font-bold font-mono ${threatCount > 0 ? "text-red-500 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+              <CountUp to={threatCount} />
+            </div>
+            <div className="mt-1 text-[11px] text-slate-500">{threatCount === 0 ? "Clean state" : "Requires triage"}</div>
+          </SpotlightCard>
         </div>
         <div className="stagger-card">
-          <StatCard
-            label="GBDT ML Inference Latency"
-            value="< 38 μs"
-            detail="14-tree pure Rust"
-            accent="text-[#7C3AED]"
-          />
+          <SpotlightCard className="p-4 bg-white dark:bg-[#12141D] border-[#EAEFF5] dark:border-[#1E2230]">
+            <div className="text-[11px] font-mono text-[#64748B] dark:text-slate-400">GBDT ML Latency</div>
+            <div className="mt-1 text-2xl font-bold font-mono text-purple-600 dark:text-purple-400">
+              {"< 38 μs"}
+            </div>
+            <div className="mt-1 text-[11px] text-slate-500">14-tree pure Rust</div>
+          </SpotlightCard>
         </div>
         <div className="stagger-card">
-          <StatCard
-            label="LOLDrivers Blocklist Hashes"
-            value="706"
-            detail="BYOVD shield enforced"
-            accent="text-[#059669]"
-          />
+          <SpotlightCard className="p-4 bg-white dark:bg-[#12141D] border-[#EAEFF5] dark:border-[#1E2230]">
+            <div className="text-[11px] font-mono text-[#64748B] dark:text-slate-400">LOLDrivers Blocklist</div>
+            <div className="mt-1 text-2xl font-bold font-mono text-emerald-600 dark:text-emerald-400">
+              <CountUp to={706} />
+            </div>
+            <div className="mt-1 text-[11px] text-slate-500">BYOVD shield enforced</div>
+          </SpotlightCard>
         </div>
       </div>
 

@@ -182,6 +182,7 @@ export const api = {
   quarantine: () => invoke<QuarantineRow[]>("list_quarantine"),
   quarantineAction: (sha256: string, action: "restore" | "delete") =>
     invoke<void>("quarantine_action", { sha256, action }),
+  quarantineFile: (path: string) => invoke<string>("quarantine_file", { path }),
   whitelist: () => invoke<WhitelistRow[]>("list_whitelist"),
   addWhitelist: (path: string, label: string) =>
     invoke<void>("add_whitelist", { path, label }),

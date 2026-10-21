@@ -17,6 +17,7 @@ fn main() {
             commands::list_threats,
             commands::list_quarantine,
             commands::quarantine_action,
+            commands::quarantine_file,
             commands::list_whitelist,
             commands::add_whitelist,
             commands::remove_whitelist,

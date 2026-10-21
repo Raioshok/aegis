@@ -440,6 +440,24 @@ pub async fn quarantine_action(
 }
 
 #[tauri::command]
+pub async fn quarantine_file(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<String, String> {
+    let path_clone = path.clone();
+    let db = std::sync::Arc::clone(&state.db);
+    tokio::task::spawn_blocking(move || {
+        let p = std::path::Path::new(&path_clone);
+        let q = Quarantine::open(&db).map_err(|e| e.to_string())?;
+        let rec = q.quarantine(p, "Manual.Quarantine", "UserAction", "User initiated quarantine", 3, 0)
+            .map_err(|e| e.to_string())?;
+        Ok(rec.sha256)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn list_whitelist() -> Result<Vec<WhitelistRow>, String> {
     Ok(Whitelist::load()
         .rules

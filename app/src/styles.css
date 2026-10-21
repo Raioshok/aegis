@@ -48,12 +48,21 @@ html.light ::-webkit-scrollbar-thumb {
   background: #CBD5E1;
   border-radius: 9999px;
 }
-html.light ::-webkit-scrollbar-thumb:hover {
-  background: #94A3B8;
-}
 html.dark ::-webkit-scrollbar-thumb {
-  background: #2D3748;
+  background: #1E2333;
   border-radius: 9999px;
+}
+
+@keyframes shine {
+  0% {
+    background-position: 100%;
+  }
+  100% {
+    background-position: -100%;
+  }
+}
+.animate-shine {
+  animation: shine 5s linear infinite;
 }
 html.dark ::-webkit-scrollbar-thumb:hover {
   background: #4A5568;

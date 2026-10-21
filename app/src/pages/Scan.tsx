@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { api, severityColor, type ScanReport, type ScanProgress } from "@/lib/api";
 import { Button, Card, SectionTitle, Badge, Spinner } from "@/components/ui";
+import { SpotlightCard, Magnet, useContextMenu } from "@/components/reactbits";
 
 type ScanMode = "smart" | "full" | "custom";
 
@@ -23,6 +24,7 @@ const QUICK_TARGETS = [
 ];
 
 export default function Scan() {
+  const { showMenu } = useContextMenu();
   const [mode, setMode] = useState<ScanMode>("smart");
   const [customPath, setCustomPath] = useState("C:\\Users\\raio\\Downloads");
   const [smartTarget, setSmartTarget] = useState("C:\\Users\\raio\\Downloads");
@@ -319,14 +321,40 @@ export default function Scan() {
                     <th className="px-4 py-3 font-semibold">Severity</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#EAEFF5]">
+                <tbody className="divide-y divide-[#EAEFF5] dark:divide-[#212533]">
                   {report.results.map((r, i) => (
-                    <tr key={i} className="hover:bg-[#F8FAFC] transition-colors">
-                      <td className="px-4 py-3 font-sans font-bold text-[#DC2626]">{r.names}</td>
-                      <td className="px-4 py-3 text-[#475569] truncate max-w-sm" title={r.path}>
+                    <tr
+                      key={i}
+                      onContextMenu={(e) => {
+                        showMenu(e, [
+                          {
+                            label: `Quarantine Threat`,
+                            danger: true,
+                            action: () => {
+                              api.quarantineFile(r.path).catch(() => {});
+                            },
+                          },
+                          {
+                            label: "Copy File Path",
+                            action: () => {
+                              navigator.clipboard.writeText(r.path);
+                            },
+                          },
+                          {
+                            label: "Add to Allowlist",
+                            action: () => {
+                              api.addWhitelist(r.path, `Allowed: ${r.names}`).catch(() => {});
+                            },
+                          },
+                        ]);
+                      }}
+                      className="hover:bg-[#F8FAFC] dark:hover:bg-[#1A1E2B] transition-colors cursor-context-menu"
+                    >
+                      <td className="px-4 py-3 font-sans font-bold text-[#DC2626] dark:text-red-400">{r.names}</td>
+                      <td className="px-4 py-3 text-[#475569] dark:text-slate-300 truncate max-w-sm" title={r.path}>
                         {r.path}
                       </td>
-                      <td className="px-4 py-3 text-[#64748B]">{r.engines}</td>
+                      <td className="px-4 py-3 text-[#64748B] dark:text-slate-400">{r.engines}</td>
                       <td className="px-4 py-3">
                         <span className={`font-bold uppercase ${severityColor(r.severity)}`}>
                           {r.severity_label}

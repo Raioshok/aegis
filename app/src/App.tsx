@@ -17,10 +17,14 @@ import {
   Moon,
   Smartphone,
   FileCheck2,
+  Terminal,
+  Activity,
+  Copy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
+import { ContextMenuProvider, useContextMenu, ShinyText } from "@/components/reactbits";
 import Dashboard from "@/pages/Dashboard";
 import Scan from "@/pages/Scan";
 import Threats from "@/pages/Threats";
@@ -55,16 +59,55 @@ interface NavItem {
   badge?: number | string;
 }
 
-export default function App() {
+function MainShell() {
   const [page, setPage] = useState<PageId>("dashboard");
   const [threatCount, setThreatCount] = useState<number>(0);
   const { theme, toggleTheme } = useTheme();
+  const { showMenu } = useContextMenu();
 
   useEffect(() => {
     api.threats(20)
       .then((t) => setThreatCount(t.length))
       .catch(() => {});
   }, [page]);
+
+  const handleGlobalContextMenu = (e: React.MouseEvent) => {
+    showMenu(e, [
+      {
+        label: "Run Smart Scan",
+        icon: <Shield size={14} className="text-[#FF7222]" />,
+        shortcut: "Ctrl+S",
+        action: () => setPage("scan"),
+      },
+      {
+        label: "Memory Evasion Audit",
+        icon: <Radar size={14} className="text-emerald-400" />,
+        action: () => setPage("behavior"),
+      },
+      {
+        label: "Quarantine Vault",
+        icon: <Lock size={14} className="text-amber-400" />,
+        action: () => setPage("quarantine"),
+      },
+      {
+        label: "Android APK Inspector",
+        icon: <Smartphone size={14} className="text-sky-400" />,
+        action: () => setPage("android"),
+      },
+      {
+        label: "Shields & Settings",
+        icon: <Sliders size={14} className="text-slate-400" />,
+        action: () => setPage("settings"),
+      },
+      {
+        label: "Copy Version & Diagnostics",
+        icon: <Copy size={14} className="text-slate-400" />,
+        action: () => {
+          navigator.clipboard.writeText("Aegis EDR v0.1.0 (Pure-Rust Engine + ReactBits UI)");
+        },
+      },
+    ]);
+  };
 
   const NAV: NavItem[] = [
     { id: "dashboard", label: "Overview", icon: <LayoutGrid size={18} /> },
@@ -87,7 +130,10 @@ export default function App() {
   ];
 
   return (
-    <div className="flex h-full select-none overflow-hidden bg-[#F6F8FB] dark:bg-[#0C0D12] text-[#1E293B] dark:text-white transition-colors">
+    <div
+      onContextMenu={handleGlobalContextMenu}
+      className="flex h-full select-none overflow-hidden bg-[#F6F8FB] dark:bg-[#0C0D12] text-[#1E293B] dark:text-white transition-colors"
+    >
       {/* Sidebar with Dark/Light Support */}
       <aside className="flex w-64 flex-col bg-white dark:bg-[#10121A] border-r border-[#EAEFF5] dark:border-[#212533] px-4 py-6 justify-between transition-colors">
         <div>
@@ -99,7 +145,7 @@ export default function App() {
               </div>
               <div>
                 <div className="text-xl font-extrabold tracking-tight text-[#1E293B] dark:text-white leading-none">
-                  aegis
+                  <ShinyText text="aegis" speed={4} />
                 </div>
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-[#FF7222] mt-1">
                   Security Suite
@@ -110,7 +156,7 @@ export default function App() {
             {/* Dark / Light Mode Switch Button in Header */}
             <button
               onClick={toggleTheme}
-              className="p-2 rounded-xl text-[#64748B] dark:text-[#8491A2] hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B] hover:text-[#1E293B] dark:hover:text-white transition-colors"
+              className="p-2 rounded-xl text-[#64748B] dark:text-[#8491A2] hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B] hover:text-[#1E293B] dark:hover:text-white transition-colors active:scale-95"
               title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
             >
               {theme === "dark" ? (
@@ -137,12 +183,7 @@ export default function App() {
                   )}
                 >
                   <div className="flex items-center gap-3">
-                    <span
-                      className={cn(
-                        "transition-colors",
-                        isActive ? "text-[#FF7222]" : "text-[#94A3B8] dark:text-[#64748B]"
-                      )}
-                    >
+                    <span className={cn(isActive ? "text-[#FF7222]" : "text-[#64748B] dark:text-[#8491A2]")}>
                       {n.icon}
                     </span>
                     <span>{n.label}</span>
@@ -177,13 +218,6 @@ export default function App() {
                   </div>
                 </div>
               </div>
-              <button
-                onClick={toggleTheme}
-                className="text-[#94A3B8] dark:text-[#64748B] hover:text-[#1E293B] dark:hover:text-white p-1 rounded-lg"
-                title="Toggle Theme"
-              >
-                {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
-              </button>
             </div>
           </div>
         </div>
@@ -212,5 +246,13 @@ export default function App() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ContextMenuProvider>
+      <MainShell />
+    </ContextMenuProvider>
   );
 }
