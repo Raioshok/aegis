@@ -218,17 +218,18 @@ The Aegis desktop application (`app/`) is built on **Tauri v2** with a focus on 
 └──────────────────────────┴──────────────────────────┴──────────────────────────────────┘
 ```
 
-### Phase 1: Completed SOTA Enhancements (Current Master)
+### Phase 1: Completed SOTA Enhancements
 * [x] **ChaCha20-Poly1305 Quarantine Vault**: Rest data authenticated encryption with DPAPI keys.
 * [x] **On-Device GBDT PE Engine**: Pure-Rust flat-array decision tree runner ($< 40\text{ }\mu\text{s}$ latency).
 * [x] **BYOVD LOLDrivers Shield**: Cryptographic hash blocklist for vulnerable kernel drivers.
 * [x] **Module Stomping Hunter**: In-memory `.text` section hash diffing against on-disk signed DLLs.
 * [x] **FunctionPeekaboo Hunter**: TEB `UserReserved` slot inspection for on-demand function masking.
 * [x] **Early Cascade Injection Trap**: Process creation rules catching Shim engine hijacking before EDR loads.
-* [x] **116 / 116 Tests Passing**: Full unit and integration coverage across all crates.
 
-### Phase 2: Behavioral Provenance Graph & Dynamic Intel (Next Up)
-* [ ] **Process Execution DAG Engine**: Model process trees as Directed Acyclic Graphs with anomaly scoring (e.g. `WINWORD.EXE` $\rightarrow$ `cmd.exe` $\rightarrow$ `powershell.exe`).
+### Phase 2: Behavioral Provenance Graph & Dynamic Intel (Active)
+* [x] **Process Execution DAG Engine**: Lock-free DAG process lineage tracker with MITRE ATT&CK mapping (`T1204.002`, `T1059`, `T1105`) and AI Agent visibility (Cursor, Claude Code, Copilot, OpenCode, Codex, Ollama, LM Studio).
+* [x] **Process DAG & Lineage Desktop UI**: Interactive tree-view with MITRE badges, AI agent tagging, and live lineage alert termination.
+* [x] **120 / 120 Tests Passing**: Full unit and integration coverage across all crates.
 * [ ] **ThreatFox & MalwareBazaar Live Feeds**: Automated real-time streaming ingestion into local threat intelligence cache.
 * [ ] **Automated In-Guest Detonation Runner**: Autonomous execution inside Hyper-V guest lab (`172.31.0.1:9090`) with automated IoC extraction.
 

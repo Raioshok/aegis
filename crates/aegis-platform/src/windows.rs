@@ -80,6 +80,32 @@ impl ProcessControl for WindowsProcessControl {
         }
         Ok(pids)
     }
+
+    fn enumerate_processes_snapshot(&self) -> Result<Vec<(u32, u32, String)>> {
+        let mut procs = Vec::new();
+        unsafe {
+            let snap = windows_sys::Win32::System::Diagnostics::ToolHelp::CreateToolhelp32Snapshot(
+                windows_sys::Win32::System::Diagnostics::ToolHelp::TH32CS_SNAPPROCESS,
+                0,
+            );
+            if snap != windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE && !snap.is_null() {
+                let mut entry: windows_sys::Win32::System::Diagnostics::ToolHelp::PROCESSENTRY32W = std::mem::zeroed();
+                entry.dwSize = std::mem::size_of::<windows_sys::Win32::System::Diagnostics::ToolHelp::PROCESSENTRY32W>() as u32;
+                if windows_sys::Win32::System::Diagnostics::ToolHelp::Process32FirstW(snap, &mut entry) != 0 {
+                    loop {
+                        let name = String::from_utf16_lossy(&entry.szExeFile);
+                        procs.push((entry.th32ProcessID, entry.th32ParentProcessID, name.trim_matches('\0').to_string()));
+                        if windows_sys::Win32::System::Diagnostics::ToolHelp::Process32NextW(snap, &mut entry) == 0 {
+                            break;
+                        }
+                    }
+                }
+                windows_sys::Win32::Foundation::CloseHandle(snap);
+            }
+        }
+        Ok(procs)
+    }
+
     fn suspend(&self, pid: u32) -> Result<()> {
         unsafe {
             let ntdll = windows_sys::Win32::System::LibraryLoader::GetModuleHandleA(b"ntdll.dll\0".as_ptr());

@@ -41,6 +41,8 @@ fn main() {
             commands::get_smart_scan_target,
             commands::scan_android_package,
             commands::get_gateway_stats,
+            commands::get_process_dag_snapshot,
+            commands::get_process_lineage_alerts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Aegis");

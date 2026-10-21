@@ -98,11 +98,56 @@ export interface OptimizeReport {
 
 export interface ProcessItem {
   pid: number;
+  ppid: number;
   name: string;
   path: string;
   is_signed: boolean;
   is_suspicious: boolean;
   risk_score: number;
+  is_agent_context: boolean;
+  agent_label: string | null;
+  mitre_techniques: string[];
+  risk_factors: string[];
+}
+
+export interface ProcessTreeNodeDto {
+  pid: number;
+  ppid: number;
+  name: string;
+  path: string;
+  risk_score: number;
+  is_signed: boolean;
+  is_agent_context: boolean;
+  agent_type_label: string | null;
+  mitre_techniques: string[];
+  children: ProcessTreeNodeDto[];
+}
+
+export interface LineageAlertDto {
+  alert_id: string;
+  parent_pid: number;
+  parent_name: string;
+  parent_exe: string;
+  child_pid: number;
+  child_name: string;
+  child_exe: string;
+  child_cmdline: string;
+  severity: string;
+  threat: string;
+  risk_score: number;
+  mitre_techniques: string[];
+  explanation: string;
+  agent_context: string | null;
+  timestamp_ms: number;
+}
+
+export interface ProcessDagSnapshot {
+  total_nodes: number;
+  root_processes: number;
+  active_alerts: number;
+  nodes: ProcessItem[];
+  alerts: LineageAlertDto[];
+  trees: ProcessTreeNodeDto[];
 }
 
 export interface VulnerabilityItem {
@@ -161,6 +206,8 @@ export const api = {
   getScanProgress: () => invoke<ScanProgress>("get_scan_progress"),
   getSmartScanTarget: () => invoke<string>("get_smart_scan_target"),
   scanAndroidPackage: (path: string) => invoke<ApkReport>("scan_android_package", { path }),
+  getProcessDag: () => invoke<ProcessDagSnapshot>("get_process_dag_snapshot"),
+  getLineageAlerts: () => invoke<LineageAlertDto[]>("get_process_lineage_alerts"),
 };
 
 export interface DexAnalysis {

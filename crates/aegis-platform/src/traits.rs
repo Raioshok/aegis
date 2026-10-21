@@ -32,6 +32,11 @@ pub trait ProcessControl: Send + Sync {
     fn kill(&self, pid: u32) -> Result<()>;
     fn image_path(&self, pid: u32) -> Option<PathBuf>;
     fn enumerate_pids(&self) -> Result<Vec<u32>>;
+    /// Returns (pid, parent_pid, process_name)
+    fn enumerate_processes_snapshot(&self) -> Result<Vec<(u32, u32, String)>> {
+        let pids = self.enumerate_pids()?;
+        Ok(pids.into_iter().map(|p| (p, 0, format!("Process {p}"))).collect())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

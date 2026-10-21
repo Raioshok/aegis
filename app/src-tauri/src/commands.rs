@@ -4,7 +4,7 @@
 //! (so the UI is fully functional without the daemon); live daemon status and
 //! real-time counters are fetched from the running daemon over `aegis-ipc`.
 
-use aegis_behavior::{memory, rootkit};
+use aegis_behavior::{memory, rootkit, LineageAlert, ProcessDagSnapshot, ProcessTreeDag};
 use aegis_core::{now_epoch, paths, Config, Detection, FileVerdict, Severity, Whitelist};
 use aegis_engine::{shared_engines, Engine, Scanner};
 use aegis_ipc::protocol::Request;
@@ -47,6 +47,7 @@ pub struct AppState {
     pub db: Arc<Database>,
     pub engines: Mutex<Arc<Vec<Box<dyn Engine>>>>,
     pub scan_progress: Arc<Mutex<ScanProgress>>,
+    pub process_dag: Arc<ProcessTreeDag>,
 }
 
 impl AppState {
@@ -59,6 +60,7 @@ impl AppState {
             db,
             engines: Mutex::new(engines),
             scan_progress: Arc::new(Mutex::new(ScanProgress::default())),
+            process_dag: Arc::new(ProcessTreeDag::new()),
         })
     }
 }
@@ -731,32 +733,44 @@ pub fn toggle_game_mode(enabled: bool) -> Result<GameModeStatusDto, String> {
 #[derive(Serialize)]
 pub struct ProcessItem {
     pub pid: u32,
+    pub ppid: u32,
     pub name: String,
     pub path: String,
     pub is_signed: bool,
     pub is_suspicious: bool,
     pub risk_score: u8,
+    pub is_agent_context: bool,
+    pub agent_label: Option<String>,
+    pub mitre_techniques: Vec<String>,
+    pub risk_factors: Vec<String>,
 }
 
 #[tauri::command]
-pub async fn list_processes() -> Result<Vec<ProcessItem>, String> {
-    tokio::task::spawn_blocking(|| {
+pub async fn list_processes(state: tauri::State<'_, AppState>) -> Result<Vec<ProcessItem>, String> {
+    let dag = state.process_dag.clone();
+    tokio::task::spawn_blocking(move || {
         let ctrl = aegis_platform::default_process_control();
-        let pids = ctrl.enumerate_pids().map_err(|e| e.to_string())?;
+        let procs = ctrl.enumerate_processes_snapshot().map_err(|e| e.to_string())?;
 
         let mut items = Vec::new();
-        for pid in pids.into_iter().take(150) {
+        let now = aegis_core::now_epoch() * 1000;
+
+        for (pid, ppid, raw_name) in procs.into_iter().take(250) {
             let path_opt = ctrl.image_path(pid);
             let path_str = path_opt
                 .as_ref()
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_else(|| format!("[PID {pid}]"));
 
-            let name = path_opt
-                .as_ref()
-                .and_then(|p| p.file_name())
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| format!("Process {pid}"));
+            let name = if !raw_name.is_empty() {
+                raw_name
+            } else {
+                path_opt
+                    .as_ref()
+                    .and_then(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| format!("Process {pid}"))
+            };
 
             #[cfg(windows)]
             let is_signed = path_opt
@@ -767,25 +781,38 @@ pub async fn list_processes() -> Result<Vec<ProcessItem>, String> {
             #[cfg(not(windows))]
             let is_signed = true;
 
-            let path_lower = path_str.to_ascii_lowercase();
-            let is_in_temp = path_lower.contains("temp") || path_lower.contains("tmp") || path_lower.contains("/dev/shm");
-            let is_suspicious = is_in_temp || (!is_signed && is_in_temp);
-
-            let risk_score = if is_suspicious {
-                85
-            } else if !is_signed {
-                40
-            } else {
-                5
+            // Ingest into Process DAG for lineage scoring & AI agent detection
+            let pevent = aegis_core::ProcessEvent {
+                pid,
+                ppid,
+                exe: path_opt.clone().unwrap_or_else(|| PathBuf::from(&name)),
+                cmdline: vec![name.clone()],
+                kind: aegis_core::ProcessEventKind::Exec,
+                timestamp_ms: now as u64,
             };
+            dag.add_process(&pevent, is_signed, None);
+
+            let node_opt = dag.get_process(pid);
+            let (risk_score, is_agent_context, agent_label, mitre_techniques, risk_factors) = if let Some(n) = node_opt {
+                (n.risk_score, n.is_agent_context, n.agent_type.map(|a| a.label().to_string()), n.mitre_techniques, n.risk_factors)
+            } else {
+                (if is_signed { 5 } else { 35 }, false, None, Vec::new(), Vec::new())
+            };
+
+            let is_suspicious = risk_score >= 60;
 
             items.push(ProcessItem {
                 pid,
+                ppid,
                 name,
                 path: path_str,
                 is_signed,
                 is_suspicious,
                 risk_score,
+                is_agent_context,
+                agent_label,
+                mitre_techniques,
+                risk_factors,
             });
         }
         items.sort_by(|a, b| b.risk_score.cmp(&a.risk_score));
@@ -793,6 +820,20 @@ pub async fn list_processes() -> Result<Vec<ProcessItem>, String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn get_process_dag_snapshot(
+    state: tauri::State<'_, AppState>,
+) -> Result<ProcessDagSnapshot, String> {
+    Ok(state.process_dag.snapshot())
+}
+
+#[tauri::command]
+pub async fn get_process_lineage_alerts(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<LineageAlert>, String> {
+    Ok(state.process_dag.get_alerts(100))
 }
 
 #[tauri::command]

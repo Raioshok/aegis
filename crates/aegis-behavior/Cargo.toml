@@ -11,6 +11,7 @@ aegis-core.workspace = true
 aegis-engine.workspace = true
 aegis-platform.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]

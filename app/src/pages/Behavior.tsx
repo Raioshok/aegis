@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { Radar, Cpu, ShieldCheck, AlertTriangle, Play, Activity, EyeOff, FileCode2 } from "lucide-react";
-import { api, severityColor, type ThreatRow } from "@/lib/api";
+import { useState, useEffect } from "react";
+import { Radar, Cpu, ShieldCheck, AlertTriangle, Play, Activity, EyeOff, FileCode2, GitBranch, Bot, Skull } from "lucide-react";
+import { api, severityColor, type ThreatRow, type LineageAlertDto } from "@/lib/api";
 import { Button, Card, SectionTitle, Badge, Spinner } from "@/components/ui";
 
 function Findings({ rows }: { rows: ThreatRow[] }) {
@@ -34,8 +34,28 @@ function Findings({ rows }: { rows: ThreatRow[] }) {
 export default function Behavior() {
   const [rootkit, setRootkit] = useState<ThreatRow[] | null>(null);
   const [memory, setMemory] = useState<ThreatRow[] | null>(null);
+  const [lineageAlerts, setLineageAlerts] = useState<LineageAlertDto[]>([]);
   const [pid, setPid] = useState("");
   const [busy, setBusy] = useState<"rootkit" | "memory" | null>(null);
+
+  const loadAlerts = () => {
+    api.getLineageAlerts().then(setLineageAlerts).catch(() => {});
+  };
+
+  useEffect(() => {
+    loadAlerts();
+    const iv = setInterval(loadAlerts, 4000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const handleKill = async (targetPid: number) => {
+    try {
+      await api.killProcess(targetPid);
+      loadAlerts();
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const runRootkit = async () => {
     setBusy("rootkit");
@@ -62,6 +82,63 @@ export default function Behavior() {
         title="Behavioral Engine & Threat Guard"
         subtitle="In-memory code injection analysis, rootkit cross-view validation, and ransomware activity traps."
       />
+
+      {/* Process Execution DAG Lineage Alerts (MITRE ATT&CK) */}
+      {lineageAlerts.length > 0 && (
+        <Card className="p-5 border border-[#FECACA] bg-[#FEF2F2] space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5 font-bold text-sm text-[#DC2626]">
+              <GitBranch size={18} />
+              <span>Process Execution DAG Anomaly Alerts ({lineageAlerts.length})</span>
+            </div>
+            <Badge color="danger">High Severity Lineages</Badge>
+          </div>
+          <div className="space-y-2">
+            {lineageAlerts.map((a) => (
+              <div
+                key={a.alert_id}
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl bg-white border border-[#FCA5A5] font-mono text-xs"
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 font-bold text-[#DC2626]">
+                    <span>[{a.threat}]</span>
+                    {a.agent_context && (
+                      <span className="inline-flex items-center gap-1 rounded bg-[#F5F3FF] border border-[#DDD6FE] px-1.5 py-0.5 text-[10px] text-[#7C3AED]">
+                        <Bot size={11} /> {a.agent_context}
+                      </span>
+                    )}
+                    {a.mitre_techniques?.map((t) => (
+                      <span
+                        key={t}
+                        className="rounded bg-[#FEF2F2] border border-[#FECACA] px-1 text-[9px] text-[#DC2626]"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="text-[11px] text-[#64748B] font-sans">
+                    {a.explanation}
+                  </div>
+                  <div className="text-[10px] text-[#94A3B8] truncate max-w-xl">
+                    Parent: {a.parent_name} (PID {a.parent_pid}) ➔ Child PID {a.child_pid}: {a.child_cmdline}
+                  </div>
+                </div>
+
+                <div className="shrink-0 flex items-center gap-2">
+                  <Badge color="danger">Score {a.risk_score}</Badge>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => handleKill(a.child_pid)}
+                  >
+                    <Skull size={13} /> Terminate
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Rootkit Detector */}
