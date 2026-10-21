@@ -42,6 +42,19 @@ pub struct ThreadAnomaly {
     pub start_address: usize,
     pub is_rip_unbacked: bool,
     pub is_start_unbacked: bool,
+    pub teb_user_reserved: Option<[usize; 4]>,
+    pub is_function_peekaboo: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleStompAnomaly {
+    pub module_name: String,
+    pub module_path: PathBuf,
+    pub base_address: usize,
+    pub text_rva: usize,
+    pub text_size: usize,
+    pub disk_sha256: String,
+    pub mem_sha256: String,
 }
 
 pub trait MemoryInspector: Send + Sync {
@@ -51,6 +64,9 @@ pub trait MemoryInspector: Send + Sync {
         Ok(Vec::new())
     }
     fn inspect_threads(&self, _pid: u32) -> Result<Vec<ThreadAnomaly>> {
+        Ok(Vec::new())
+    }
+    fn detect_module_stomping(&self, _pid: u32) -> Result<Vec<ModuleStompAnomaly>> {
         Ok(Vec::new())
     }
 }

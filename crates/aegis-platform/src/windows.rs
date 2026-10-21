@@ -532,7 +532,54 @@ impl MemoryInspector for WindowsMemoryInspector {
                                             }
                                         }
 
-                                        if is_start_unbacked || is_rip_unbacked {
+                                        #[repr(C)]
+                                        struct THREAD_BASIC_INFORMATION {
+                                            exit_status: i32,
+                                            teb_base_address: *mut std::ffi::c_void,
+                                            client_id: [usize; 2],
+                                            affinity_mask: usize,
+                                            priority: i32,
+                                            base_priority: i32,
+                                        }
+
+                                        let mut tbi: THREAD_BASIC_INFORMATION = std::mem::zeroed();
+                                        let mut teb_user_reserved = None;
+                                        let mut is_function_peekaboo = false;
+
+                                        if query_thread(
+                                            h_thread,
+                                            0, // ThreadBasicInformation
+                                            &mut tbi as *mut _ as _,
+                                            std::mem::size_of::<THREAD_BASIC_INFORMATION>() as u32,
+                                            &mut ret_len,
+                                        ) == 0 && !tbi.teb_base_address.is_null() {
+                                            let h_proc = windows_sys::Win32::System::Threading::OpenProcess(
+                                                windows_sys::Win32::System::Threading::PROCESS_VM_READ,
+                                                0,
+                                                pid,
+                                            );
+                                            if !h_proc.is_null() && h_proc != windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+                                                let mut ures = [0usize; 4];
+                                                let mut bread = 0usize;
+                                                let target_teb_res = tbi.teb_base_address as usize + 0x0E8;
+                                                if windows_sys::Win32::System::Diagnostics::Debug::ReadProcessMemory(
+                                                    h_proc,
+                                                    target_teb_res as *const std::ffi::c_void,
+                                                    ures.as_mut_ptr() as *mut std::ffi::c_void,
+                                                    std::mem::size_of::<[usize; 4]>(),
+                                                    &mut bread,
+                                                ) != 0 && bread == std::mem::size_of::<[usize; 4]>() {
+                                                    teb_user_reserved = Some(ures);
+                                                    // FunctionPeekaboo uses gs:[0xE8] == 0x80000001
+                                                    if ures[0] == 0x8000_0001 || (ures[0] != 0 && ures[2] != 0 && ures[1] > 0x10000) {
+                                                        is_function_peekaboo = true;
+                                                    }
+                                                }
+                                                windows_sys::Win32::Foundation::CloseHandle(h_proc);
+                                            }
+                                        }
+
+                                        if is_start_unbacked || is_rip_unbacked || is_function_peekaboo {
                                             anomalies.push(ThreadAnomaly {
                                                 tid: te.th32ThreadID,
                                                 pid,
@@ -540,6 +587,8 @@ impl MemoryInspector for WindowsMemoryInspector {
                                                 start_address: start_addr,
                                                 is_rip_unbacked,
                                                 is_start_unbacked,
+                                                teb_user_reserved,
+                                                is_function_peekaboo,
                                             });
                                         }
 
@@ -557,6 +606,118 @@ impl MemoryInspector for WindowsMemoryInspector {
             }
         }
         Ok(anomalies)
+    }
+
+    fn detect_module_stomping(&self, pid: u32) -> Result<Vec<ModuleStompAnomaly>> {
+        let mut stomps = Vec::new();
+        unsafe {
+            let snap = windows_sys::Win32::System::Diagnostics::ToolHelp::CreateToolhelp32Snapshot(
+                windows_sys::Win32::System::Diagnostics::ToolHelp::TH32CS_SNAPMODULE
+                | windows_sys::Win32::System::Diagnostics::ToolHelp::TH32CS_SNAPMODULE32,
+                pid,
+            );
+            if snap != windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE && !snap.is_null() {
+                let mut me: windows_sys::Win32::System::Diagnostics::ToolHelp::MODULEENTRY32W = std::mem::zeroed();
+                me.dwSize = std::mem::size_of::<windows_sys::Win32::System::Diagnostics::ToolHelp::MODULEENTRY32W>() as u32;
+
+                if windows_sys::Win32::System::Diagnostics::ToolHelp::Module32FirstW(snap, &mut me) != 0 {
+                    let h_proc = windows_sys::Win32::System::Threading::OpenProcess(
+                        windows_sys::Win32::System::Threading::PROCESS_VM_READ | windows_sys::Win32::System::Threading::PROCESS_QUERY_INFORMATION,
+                        0,
+                        pid,
+                    );
+                    if !h_proc.is_null() && h_proc != windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+                        loop {
+                            let mod_name = String::from_utf16_lossy(&me.szModule);
+                            let mod_name_clean = mod_name.trim_matches('\0').to_string();
+                            let mod_path = String::from_utf16_lossy(&me.szExePath);
+                            let mod_path_clean = PathBuf::from(mod_path.trim_matches('\0'));
+
+                            // Skip the main executable image itself
+                            if !mod_name_clean.ends_with(".exe") && mod_path_clean.is_file() {
+                                if let Ok(disk_bytes) = std::fs::read(&mod_path_clean) {
+                                    if disk_bytes.starts_with(b"MZ") && disk_bytes.len() > 0x100 {
+                                        let pe_offset = u32::from_le_bytes(disk_bytes[0x3C..0x40].try_into().unwrap_or([0; 4])) as usize;
+                                        if pe_offset + 0x18 + 0x60 < disk_bytes.len() && &disk_bytes[pe_offset..pe_offset + 4] == b"PE\0\0" {
+                                            let num_sections = u16::from_le_bytes(disk_bytes[pe_offset + 6..pe_offset + 8].try_into().unwrap_or([0; 2])) as usize;
+                                            let opt_hdr_size = u16::from_le_bytes(disk_bytes[pe_offset + 20..pe_offset + 22].try_into().unwrap_or([0; 2])) as usize;
+                                            let sec_hdr_start = pe_offset + 24 + opt_hdr_size;
+
+                                            for i in 0..num_sections {
+                                                let s_off = sec_hdr_start + (i * 40);
+                                                if s_off + 40 <= disk_bytes.len() {
+                                                    let sec_name = &disk_bytes[s_off..s_off + 8];
+                                                    if sec_name.starts_with(b".text") || sec_name.starts_with(b"code") {
+                                                        let v_size = u32::from_le_bytes(disk_bytes[s_off + 8..s_off + 12].try_into().unwrap_or([0; 4])) as usize;
+                                                        let v_addr = u32::from_le_bytes(disk_bytes[s_off + 12..s_off + 16].try_into().unwrap_or([0; 4])) as usize;
+                                                        let raw_size = u32::from_le_bytes(disk_bytes[s_off + 16..s_off + 20].try_into().unwrap_or([0; 4])) as usize;
+                                                        let raw_ptr = u32::from_le_bytes(disk_bytes[s_off + 20..s_off + 24].try_into().unwrap_or([0; 4])) as usize;
+
+                                                        let scan_len = v_size.min(raw_size).min(0x10000);
+                                                        if scan_len > 0x100 && raw_ptr + scan_len <= disk_bytes.len() {
+                                                            let disk_text_slice = &disk_bytes[raw_ptr..raw_ptr + scan_len];
+                                                            let mut mem_text_buf = vec![0u8; scan_len];
+                                                            let mem_addr = me.modBaseAddr as usize + v_addr;
+                                                            let mut bytes_read = 0usize;
+
+                                                            if windows_sys::Win32::System::Diagnostics::Debug::ReadProcessMemory(
+                                                                h_proc,
+                                                                mem_addr as *const std::ffi::c_void,
+                                                                mem_text_buf.as_mut_ptr() as *mut std::ffi::c_void,
+                                                                scan_len,
+                                                                &mut bytes_read,
+                                                            ) != 0 && bytes_read == scan_len {
+                                                                use sha2::{Digest, Sha256};
+                                                                let mut h1 = Sha256::new();
+                                                                h1.update(disk_text_slice);
+                                                                let disk_sha = format!("{:x}", h1.finalize());
+
+                                                                let mut h2 = Sha256::new();
+                                                                h2.update(&mem_text_buf);
+                                                                let mem_sha = format!("{:x}", h2.finalize());
+
+                                                                // If hashes mismatch, count byte difference (ignoring small relocation differences)
+                                                                if disk_sha != mem_sha {
+                                                                    let mut diff_count = 0;
+                                                                    for (b1, b2) in disk_text_slice.iter().zip(mem_text_buf.iter()) {
+                                                                        if b1 != b2 {
+                                                                            diff_count += 1;
+                                                                        }
+                                                                    }
+                                                                    if diff_count > (scan_len / 7) {
+                                                                        stomps.push(ModuleStompAnomaly {
+                                                                            module_name: mod_name_clean.clone(),
+                                                                            module_path: mod_path_clean.clone(),
+                                                                            base_address: me.modBaseAddr as usize,
+                                                                            text_rva: v_addr,
+                                                                            text_size: scan_len,
+                                                                            disk_sha256: disk_sha,
+                                                                            mem_sha256: mem_sha,
+                                                                        });
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if windows_sys::Win32::System::Diagnostics::ToolHelp::Module32NextW(snap, &mut me) == 0 {
+                                break;
+                            }
+                        }
+                        windows_sys::Win32::Foundation::CloseHandle(h_proc);
+                    }
+                }
+                windows_sys::Win32::Foundation::CloseHandle(snap);
+            }
+        }
+        Ok(stomps)
     }
 }
 

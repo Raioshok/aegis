@@ -35,6 +35,10 @@ pub enum MatchCondition {
     StickyKeysHijack,
     /// Living-off-the-land binary loading Mockingjay-vulnerable DLLs (e.g. ssh-keygen with msys-2.0.dll)
     MockingjayTargetLoad,
+    /// Early Cascade process creation / Shim engine hijacking (Outflank 2024 technique)
+    EarlyCascadeInjection,
+    /// Anomalous process execution lineage (DAG child spawned from untrusted document parent)
+    ProcessLineageAnomaly,
     /// Parent and child binary name match
     ParentChildMatch { parent: String, child: String },
     /// Custom command line regex pattern
@@ -148,6 +152,20 @@ impl BehaviorRuleEngine {
                 class: ThreatClass::Behavioral,
                 condition: MatchCondition::MockingjayTargetLoad,
             },
+            BehaviorRule {
+                name: "Behavior.Injection.EarlyCascade".into(),
+                description: "Process spawned in suspended state with Shim engine tampering (Early Cascade injection)".into(),
+                severity: Severity::Critical,
+                class: ThreatClass::Behavioral,
+                condition: MatchCondition::EarlyCascadeInjection,
+            },
+            BehaviorRule {
+                name: "Behavior.Lineage.DocumentSpawnedShell".into(),
+                description: "Document reader or Office application spawned interactive interpreter or LOLBin".into(),
+                severity: Severity::Critical,
+                class: ThreatClass::Behavioral,
+                condition: MatchCondition::ProcessLineageAnomaly,
+            },
         ];
         Self { rules }
     }
@@ -257,6 +275,24 @@ impl BehaviorRuleEngine {
                 MatchCondition::MockingjayTargetLoad => {
                     (cmdline_lower.contains("msys-2.0.dll") || exe_lower.contains("msys-2.0.dll"))
                         || ((exe_name == "ssh-keygen.exe" || exe_name == "ssh-keygen") && cmdline_lower.contains("msys"))
+                }
+
+                MatchCondition::EarlyCascadeInjection => {
+                    let b = exe_name.to_ascii_lowercase();
+                    (b == "werfault.exe" || b == "conhost.exe" || b == "notepad.exe" || b == "svchost.exe")
+                        && (cmdline_lower.contains("apphelp") || cmdline_lower.contains("shims") || cmdline_lower.contains(".sdb") || cmdline_lower.contains("/suspended") || cmdline_lower.contains("-s"))
+                }
+
+                MatchCondition::ProcessLineageAnomaly => {
+                    let p = parent_name.to_ascii_lowercase();
+                    let b = exe_name.to_ascii_lowercase();
+                    let is_doc = p.contains("winword") || p.contains("excel") || p.contains("powerpnt")
+                        || p.contains("acrobat") || p.contains("acrord32") || p.contains("foxit")
+                        || p.contains("outlook");
+                    let is_shell = b == "powershell.exe" || b == "powershell" || b == "cmd.exe" || b == "cmd"
+                        || b == "wscript.exe" || b == "cscript.exe" || b == "mshta.exe" || b == "certutil.exe"
+                        || b == "bash" || b == "sh";
+                    is_doc && is_shell
                 }
 
                 MatchCondition::ParentChildMatch { parent, child } => {
@@ -430,5 +466,36 @@ mod tests {
         };
         let d = engine.evaluate(&ev, None);
         assert!(d.iter().any(|x| x.threat == "Behavior.Evasion.Mockingjay"));
+    }
+
+    #[test]
+    fn detects_early_cascade_injection() {
+        let engine = BehaviorRuleEngine::default_rules();
+        let ev = ProcessEvent {
+            pid: 9009,
+            ppid: 100,
+            exe: PathBuf::from("werfault.exe"),
+            cmdline: vec!["werfault.exe".into(), "-s".into(), "apphelp.dll".into(), "/suspended".into()],
+            kind: ProcessEventKind::Exec,
+            timestamp_ms: 9000,
+        };
+        let d = engine.evaluate(&ev, None);
+        assert!(d.iter().any(|x| x.threat == "Behavior.Injection.EarlyCascade"));
+    }
+
+    #[test]
+    fn detects_document_spawned_shell() {
+        let engine = BehaviorRuleEngine::default_rules();
+        let ev = ProcessEvent {
+            pid: 9010,
+            ppid: 4004,
+            exe: PathBuf::from("powershell.exe"),
+            cmdline: vec!["powershell.exe".into(), "-ExecutionPolicy".into(), "Bypass".into()],
+            kind: ProcessEventKind::Exec,
+            timestamp_ms: 9010,
+        };
+        let parent = Path::new("C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE");
+        let d = engine.evaluate(&ev, Some(parent));
+        assert!(d.iter().any(|x| x.threat == "Behavior.Lineage.DocumentSpawnedShell"));
     }
 }

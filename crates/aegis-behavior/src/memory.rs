@@ -352,11 +352,19 @@ pub fn scan_pid(pid: u32) -> Vec<Detection> {
                 }
             }
 
-            // Check for unbacked thread execution & thread hijacking (Reflective DLL / Shellcode / PoolParty)
+            // Check for unbacked thread execution, thread hijacking, and FunctionPeekaboo
             if let Ok(anomalies) = inspector.inspect_threads(pid) {
                 for a in anomalies {
                     if !is_jit {
-                        if a.is_rip_unbacked {
+                        if a.is_function_peekaboo {
+                            out.push(Detection::new(
+                                "Memory",
+                                format!("Evasion.FunctionPeekaboo:{pid}:{}", a.tid),
+                                Severity::Critical,
+                                ThreatClass::Rootkit,
+                                format!("PID {pid} thread {} exhibits FunctionPeekaboo LLVM on-demand function masking in TEB.UserReserved", a.tid),
+                            ));
+                        } else if a.is_rip_unbacked {
                             out.push(Detection::new(
                                 "Memory",
                                 format!("Injected.ThreadHijack:{pid}:{}", a.tid),
@@ -374,6 +382,21 @@ pub fn scan_pid(pid: u32) -> Vec<Detection> {
                             ));
                         }
                     }
+                }
+            }
+
+            // Check for Module Stomping & Section Overwriting in signed DLLs
+            if let Ok(stomps) = inspector.detect_module_stomping(pid) {
+                for s in stomps {
+                    out.push(Detection::new(
+                        "Memory",
+                        format!("Injected.ModuleStomping:{pid}:{}", s.module_name),
+                        Severity::Critical,
+                        ThreatClass::Rootkit,
+                        format!("PID {pid} module {} (.text section at 0x{:x}) code was stomped in memory (disk: {}, mem: {})",
+                            s.module_name, s.base_address + s.text_rva, &s.disk_sha256[..12], &s.mem_sha256[..12]
+                        ),
+                    ));
                 }
             }
         }
