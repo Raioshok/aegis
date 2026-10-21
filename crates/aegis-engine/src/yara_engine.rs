@@ -298,4 +298,12 @@ mod tests {
 
         std::fs::remove_dir_all(&tmp).ok();
     }
+
+    #[test]
+    fn test_all_bundled_rules_compile_cleanly() {
+        use crate::{BUNDLED_YARA, BUNDLED_YARA_DROPPERS, BUNDLED_YARA_RANSOM};
+        let eng = YaraEngine::from_sources([BUNDLED_YARA, BUNDLED_YARA_DROPPERS, BUNDLED_YARA_RANSOM]).unwrap();
+        assert!(eng.failed_sources().is_empty(), "Bundled rules had compilation errors: {:?}", eng.failed_sources());
+        assert!(eng.rule_count() >= 20);
+    }
 }
