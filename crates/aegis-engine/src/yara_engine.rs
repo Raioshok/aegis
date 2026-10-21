@@ -283,7 +283,11 @@ mod tests {
 
     #[test]
     fn bad_rule_file_does_not_disable_engine() {
-        let tmp = std::env::temp_dir().join(format!("aegis-badrule-{}", std::process::id()));
+        let unique_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let tmp = std::env::temp_dir().join(format!("aegis-badrule-{}-{}", std::process::id(), unique_id));
         std::fs::create_dir_all(&tmp).unwrap();
         let good_rule = tmp.join("good.yar");
         std::fs::write(&good_rule, "rule good { condition: true }").unwrap();
