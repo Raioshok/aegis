@@ -2,15 +2,18 @@ package com.aegis.security;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ServiceInfo;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
-import android.os.AsyncTask;
 import android.os.Bundle;
+import android.text.format.DateUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -21,369 +24,410 @@ import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class MainActivity extends Activity {
-    private TextView statusHeader;
-    private TextView statusSubtitle;
-    private TextView metricScanned;
-    private TextView metricThreats;
-    private ProgressBar progressBar;
-    private TextView currentFileLabel;
-    private LinearLayout findingsContainer;
-    private Button scanButton;
+    private static final String MALWARE_FEED = "https://bazaar.abuse.ch/export/txt/sha256/recent/";
+    private static final String DB_FILE = "malware_sha256.txt";
 
-    private int totalPackages = 0;
-    private int threatsCount = 0;
+    // Palette follows the system light/dark setting.
+    private int bg, surface, line, fg, muted, brand, brandSoft, ok, okSoft, warn, warnSoft, danger, dangerSoft;
+
+    private LinearLayout statusCard;
+    private TextView statusTitle, statusText, statApps, statRisky, statDb;
+    private ProgressBar progress;
+    private TextView progressLabel;
+    private Button scanButton, updateButton;
+    private LinearLayout findings;
+    private volatile boolean busy;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        boolean dark = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        bg = Color.parseColor(dark ? "#0B0F14" : "#F2F5F8");
+        surface = Color.parseColor(dark ? "#131921" : "#FFFFFF");
+        line = Color.parseColor(dark ? "#242D39" : "#E2E7ED");
+        fg = Color.parseColor(dark ? "#E8EDF2" : "#16202B");
+        muted = Color.parseColor(dark ? "#94A1AF" : "#586573");
+        brand = Color.parseColor(dark ? "#26C49B" : "#009678");
+        brandSoft = Color.parseColor(dark ? "#0F2C25" : "#E4F5EF");
+        ok = Color.parseColor(dark ? "#34CD8C" : "#109660");
+        okSoft = Color.parseColor(dark ? "#0E2A1F" : "#E6F6EE");
+        warn = Color.parseColor(dark ? "#F5B546" : "#C47600");
+        warnSoft = Color.parseColor(dark ? "#30240E" : "#FDF3E0");
+        danger = Color.parseColor(dark ? "#F87171" : "#D43838");
+        dangerSoft = Color.parseColor(dark ? "#341618" : "#FCECEC");
+        getWindow().setStatusBarColor(bg);
 
-        // Root ScrollView
-        ScrollView scrollView = new ScrollView(this);
-        scrollView.setBackgroundColor(Color.parseColor("#0C0D12")); // #0C0D12 Deep Dark Background
-        scrollView.setFillViewport(true);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setBackgroundColor(bg);
+        scroll.setFillViewport(true);
+        LinearLayout root = vertical();
+        root.setPadding(dp(20), dp(28), dp(20), dp(28));
+        scroll.addView(root);
 
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(20), dp(36), dp(20), dp(36));
+        TextView title = text("Aegis", 24, fg, true);
+        root.addView(title);
+        root.addView(text("App security scanner", 13, muted, false));
+        space(root, 20);
 
-        // 1. Header Bar: Logo & Brand
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
+        statusCard = card(brandSoft);
+        statusTitle = text("Not scanned yet", 20, fg, true);
+        statusText = text("Scan checks every app you installed for banking-trojan and SMS-theft patterns, device-admin rights, "
+            + "sideloading and, once the malware database is downloaded, known malware samples.", 13, muted, false);
+        statusText.setPadding(0, dp(6), 0, 0);
+        statusCard.addView(statusTitle);
+        statusCard.addView(statusText);
+        root.addView(statusCard);
+        space(root, 12);
 
-        TextView logoIcon = new TextView(this);
-        logoIcon.setText("🛡");
-        logoIcon.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
-        header.addView(logoIcon);
+        LinearLayout stats = new LinearLayout(this);
+        stats.setOrientation(LinearLayout.HORIZONTAL);
+        statApps = stat(stats, "Apps checked", "—");
+        statRisky = stat(stats, "Need attention", "—");
+        statDb = stat(stats, "Malware database", "—");
+        root.addView(stats);
+        space(root, 16);
 
-        LinearLayout brandText = new LinearLayout(this);
-        brandText.setOrientation(LinearLayout.VERTICAL);
-        brandText.setPadding(dp(12), 0, 0, 0);
-
-        TextView title = new TextView(this);
-        title.setText("aegis");
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
-        title.setTextColor(Color.parseColor("#F3F4F6"));
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        brandText.addView(title);
-
-        TextView subTitle = new TextView(this);
-        subTitle.setText("MOBILE SECURITY SUITE · PURE-RUST CORE");
-        subTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
-        subTitle.setTextColor(Color.parseColor("#FF7222"));
-        subTitle.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        brandText.addView(subTitle);
-
-        header.addView(brandText);
-        root.addView(header);
-
-        // Spacer
-        addSpace(root, 24);
-
-        // 2. Protection Status Hero Card
-        LinearLayout heroCard = createCard();
-        heroCard.setPadding(dp(20), dp(20), dp(20), dp(20));
-
-        statusHeader = new TextView(this);
-        statusHeader.setText("● DEVICE FULLY PROTECTED");
-        statusHeader.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        statusHeader.setTextColor(Color.parseColor("#10B981")); // Emerald
-        statusHeader.setTypeface(Typeface.DEFAULT_BOLD);
-        heroCard.addView(statusHeader);
-
-        statusSubtitle = new TextView(this);
-        statusSubtitle.setText("Real-time permission auditor and Dalvik DEX opcode heuristics active.");
-        statusSubtitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        statusSubtitle.setTextColor(Color.parseColor("#9CA3AF"));
-        statusSubtitle.setPadding(0, dp(4), 0, 0);
-        heroCard.addView(statusSubtitle);
-
-        root.addView(heroCard);
-
-        addSpace(root, 16);
-
-        // 3. High-Density Telemetry Metrics (Row of 2 Cards)
-        LinearLayout metricsRow = new LinearLayout(this);
-        metricsRow.setOrientation(LinearLayout.HORIZONTAL);
-
-        LinearLayout card1 = createCard();
-        card1.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-        card1.setPadding(dp(16), dp(16), dp(16), dp(16));
-        TextView label1 = new TextView(this);
-        label1.setText("APPLICATIONS");
-        label1.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
-        label1.setTextColor(Color.parseColor("#6B7280"));
-        label1.setTypeface(Typeface.MONOSPACE);
-        card1.addView(label1);
-
-        metricScanned = new TextView(this);
-        metricScanned.setText("0 Audited");
-        metricScanned.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-        metricScanned.setTextColor(Color.parseColor("#F3F4F6"));
-        metricScanned.setTypeface(Typeface.DEFAULT_BOLD);
-        metricScanned.setPadding(0, dp(4), 0, 0);
-        card1.addView(metricScanned);
-        metricsRow.addView(card1);
-
-        View gap = new View(this);
-        gap.setLayoutParams(new LinearLayout.LayoutParams(dp(12), 1));
-        metricsRow.addView(gap);
-
-        LinearLayout card2 = createCard();
-        card2.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-        card2.setPadding(dp(16), dp(16), dp(16), dp(16));
-        TextView label2 = new TextView(this);
-        label2.setText("THREATS FOUND");
-        label2.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
-        label2.setTextColor(Color.parseColor("#6B7280"));
-        label2.setTypeface(Typeface.MONOSPACE);
-        card2.addView(label2);
-
-        metricThreats = new TextView(this);
-        metricThreats.setText("0 Threats");
-        metricThreats.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-        metricThreats.setTextColor(Color.parseColor("#10B981"));
-        metricThreats.setTypeface(Typeface.DEFAULT_BOLD);
-        metricThreats.setPadding(0, dp(4), 0, 0);
-        card2.addView(metricThreats);
-        metricsRow.addView(card2);
-
-        root.addView(metricsRow);
-
-        addSpace(root, 20);
-
-        // 4. Primary Action Button
-        scanButton = new Button(this);
-        scanButton.setText("START REAL-TIME THREAT AUDIT");
-        scanButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        scanButton.setTextColor(Color.WHITE);
-        scanButton.setTypeface(Typeface.DEFAULT_BOLD);
-        scanButton.setPadding(0, dp(16), 0, dp(16));
-
-        GradientDrawable btnBg = new GradientDrawable();
-        btnBg.setColor(Color.parseColor("#FF7222")); // Aegis Orange
-        btnBg.setCornerRadius(dp(12));
-        scanButton.setBackground(btnBg);
+        scanButton = button("Scan apps", brand, Color.WHITE);
         root.addView(scanButton);
+        space(root, 8);
+        updateButton = button("Update malware database", surface, fg);
+        ((GradientDrawable) updateButton.getBackground()).setStroke(dp(1), line);
+        root.addView(updateButton);
+        space(root, 12);
 
-        addSpace(root, 16);
+        progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        progress.setVisibility(View.GONE);
+        root.addView(progress);
+        progressLabel = text("", 12, muted, false);
+        progressLabel.setVisibility(View.GONE);
+        root.addView(progressLabel);
+        space(root, 12);
 
-        // 5. Scan Progress Indicator
-        progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        progressBar.setMax(100);
-        progressBar.setProgress(0);
-        progressBar.setVisibility(View.GONE);
-        root.addView(progressBar);
+        findings = vertical();
+        root.addView(findings);
+        setContentView(scroll);
 
-        currentFileLabel = new TextView(this);
-        currentFileLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        currentFileLabel.setTextColor(Color.parseColor("#9CA3AF"));
-        currentFileLabel.setTypeface(Typeface.MONOSPACE);
-        currentFileLabel.setVisibility(View.GONE);
-        currentFileLabel.setPadding(0, dp(6), 0, 0);
-        root.addView(currentFileLabel);
+        scanButton.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { startScan(); } });
+        updateButton.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { startDbUpdate(); } });
+        refreshDbStat();
+    }
 
-        addSpace(root, 16);
+    // --- Malware database -------------------------------------------------
 
-        // 6. Section Title: Findings
-        TextView findingsTitle = new TextView(this);
-        findingsTitle.setText("SECURITY AUDIT FINDINGS");
-        findingsTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        findingsTitle.setTextColor(Color.parseColor("#9CA3AF"));
-        findingsTitle.setTypeface(Typeface.DEFAULT_BOLD);
-        root.addView(findingsTitle);
+    private File dbFile() {
+        return new File(getFilesDir(), DB_FILE);
+    }
 
-        addSpace(root, 10);
+    private Set<String> loadDb() {
+        File f = dbFile();
+        if (!f.exists()) return Collections.emptySet();
+        try (InputStream in = new FileInputStream(f)) {
+            byte[] data = new byte[(int) f.length()];
+            int off = 0;
+            while (off < data.length) {
+                int n = in.read(data, off, data.length - off);
+                if (n < 0) break;
+                off += n;
+            }
+            return AegisScanner.parseHashList(new String(data, 0, off, "UTF-8"));
+        } catch (Exception e) {
+            return Collections.emptySet();
+        }
+    }
 
-        findingsContainer = new LinearLayout(this);
-        findingsContainer.setOrientation(LinearLayout.VERTICAL);
-        root.addView(findingsContainer);
+    private void refreshDbStat() {
+        File f = dbFile();
+        if (!f.exists()) {
+            statDb.setText("Not downloaded");
+        } else {
+            statDb.setText(DateUtils.getRelativeTimeSpanString(f.lastModified()).toString());
+        }
+    }
 
-        // Empty state view
-        TextView emptyNotice = new TextView(this);
-        emptyNotice.setText("No scan executed yet. Tap 'Start Real-Time Threat Audit' above to evaluate installed packages against Dalvik bytecode and permission escalation rules.");
-        emptyNotice.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        emptyNotice.setTextColor(Color.parseColor("#6B7280"));
-        emptyNotice.setPadding(dp(16), dp(24), dp(16), dp(24));
-        findingsContainer.addView(emptyNotice);
+    private void startDbUpdate() {
+        if (busy) return;
+        setBusy(true, "Downloading malware database…");
+        new Thread(new Runnable() { @Override public void run() {
+            String error = null;
+            int count = 0;
+            try {
+                HttpURLConnection c = (HttpURLConnection) new URL(MALWARE_FEED).openConnection();
+                c.setConnectTimeout(15000);
+                c.setReadTimeout(60000);
+                if (c.getResponseCode() != 200) throw new Exception("server answered " + c.getResponseCode());
+                StringBuilder sb = new StringBuilder();
+                try (InputStream in = c.getInputStream()) {
+                    byte[] buf = new byte[16384];
+                    int n;
+                    while ((n = in.read(buf)) > 0) sb.append(new String(buf, 0, n, "UTF-8"));
+                }
+                Set<String> hashes = AegisScanner.parseHashList(sb.toString());
+                if (hashes.isEmpty()) throw new Exception("download contained no hashes");
+                // Write to a temp file first so a failed download never replaces a good database.
+                File tmp = new File(getFilesDir(), DB_FILE + ".tmp");
+                try (FileOutputStream out = new FileOutputStream(tmp)) {
+                    out.write(join("\n", hashes).getBytes("UTF-8"));
+                }
+                if (!tmp.renameTo(dbFile())) throw new Exception("could not save database");
+                count = hashes.size();
+            } catch (Exception e) {
+                error = e.getMessage();
+            }
+            final String err = error;
+            final int n = count;
+            runOnUiThread(new Runnable() { @Override public void run() {
+                setBusy(false, null);
+                refreshDbStat();
+                showNote(err == null ? "Malware database updated: " + n + " sample hashes." : "Update failed: " + err, err == null ? ok : danger);
+            } });
+        } }).start();
+    }
 
-        scrollView.addView(root);
-        setContentView(scrollView);
+    // --- Scan ------------------------------------------------------------------
 
-        // Button Listener
-        scanButton.setOnClickListener(new View.OnClickListener() {
+    private void startScan() {
+        if (busy) return;
+        setBusy(true, "Reading installed apps…");
+        findings.removeAllViews();
+        new Thread(new Runnable() { @Override public void run() {
+            PackageManager pm = getPackageManager();
+            int flags = PackageManager.GET_PERMISSIONS | PackageManager.GET_SERVICES | PackageManager.GET_RECEIVERS;
+            List<PackageInfo> all = pm.getInstalledPackages(flags);
+            final List<PackageInfo> apps = new ArrayList<>();
+            for (PackageInfo p : all) {
+                ApplicationInfo ai = p.applicationInfo;
+                boolean system = ai != null && (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0
+                    && (ai.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0;
+                if (!system && !p.packageName.equals(getPackageName())) apps.add(p);
+            }
+            Set<String> db = loadDb();
+            final List<ScanResult> risky = new ArrayList<>();
+            for (int i = 0; i < apps.size(); i++) {
+                PackageInfo p = apps.get(i);
+                final int done = i;
+                final String name = p.packageName;
+                final int total = apps.size();
+                runOnUiThread(new Runnable() { @Override public void run() {
+                    progress.setMax(total);
+                    progress.setProgress(done);
+                    progressLabel.setText("Checking " + name);
+                } });
+                ScanResult r = AegisScanner.evaluate(facts(pm, p, !db.isEmpty()), db);
+                if (r.riskScore >= AegisScanner.SUSPICIOUS) risky.add(r);
+            }
+            Collections.sort(risky, new Comparator<ScanResult>() {
+                @Override
+                public int compare(ScanResult a, ScanResult b) {
+                    return b.riskScore - a.riskScore;
+                }
+            });
+            final boolean usedDb = !db.isEmpty();
+            final int checked = apps.size();
+            runOnUiThread(new Runnable() { @Override public void run() { showResults(checked, risky, usedDb); } });
+        } }).start();
+    }
+
+    private AegisScanner.AppFacts facts(PackageManager pm, PackageInfo p, boolean hash) {
+        AegisScanner.AppFacts f = new AegisScanner.AppFacts();
+        f.packageName = p.packageName;
+        f.requestedPermissions = p.requestedPermissions;
+        if (p.applicationInfo != null) {
+            f.appName = pm.getApplicationLabel(p.applicationInfo).toString();
+            if (hash && p.applicationInfo.sourceDir != null) f.apkSha256 = sha256(new File(p.applicationInfo.sourceDir));
+        }
+        if (p.services != null) {
+            for (ServiceInfo s : p.services) {
+                if ("android.permission.BIND_ACCESSIBILITY_SERVICE".equals(s.permission)) f.hasAccessibilityService = true;
+            }
+        }
+        if (p.receivers != null) {
+            for (ActivityInfo r : p.receivers) {
+                if ("android.permission.BIND_DEVICE_ADMIN".equals(r.permission)) f.hasDeviceAdmin = true;
+            }
+        }
+        try {
+            f.installer = pm.getInstallerPackageName(p.packageName);
+        } catch (IllegalArgumentException ignored) {
+            f.installer = null;
+        }
+        return f;
+    }
+
+    private static String sha256(File file) {
+        try (InputStream in = new FileInputStream(file)) {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) > 0) md.update(buf, 0, n);
+            StringBuilder sb = new StringBuilder();
+            for (byte b : md.digest()) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void showResults(int checked, List<ScanResult> risky, boolean usedDb) {
+        setBusy(false, null);
+        statApps.setText(String.valueOf(checked));
+        statRisky.setText(String.valueOf(risky.size()));
+        boolean dangerous = !risky.isEmpty() && risky.get(0).riskScore >= AegisScanner.DANGEROUS;
+        if (risky.isEmpty()) {
+            setStatus(okSoft, "No risky apps found", "Checked " + checked + " installed apps."
+                + (usedDb ? "" : " Download the malware database to also match known malware samples."));
+        } else {
+            setStatus(dangerous ? dangerSoft : warnSoft, risky.size() + (risky.size() == 1 ? " app needs" : " apps need") + " attention",
+                "Review the apps below. Uninstall any you do not recognise.");
+        }
+        for (ScanResult r : risky) findings.addView(findingCard(r));
+    }
+
+    private View findingCard(final ScanResult r) {
+        LinearLayout c = card(surface);
+        boolean danger_ = r.riskScore >= AegisScanner.DANGEROUS;
+        c.addView(text(r.appName, 15, fg, true));
+        TextView pkg = text(r.packageName, 12, muted, false);
+        c.addView(pkg);
+        TextView verdict = text(r.verdict + " · risk " + r.riskScore + "/100", 12, danger_ ? danger : warn, true);
+        verdict.setPadding(0, dp(6), 0, dp(4));
+        c.addView(verdict);
+        for (String reason : r.threats) c.addView(text("• " + reason, 13, fg, false));
+        if (!r.dangerousPermissions.isEmpty()) {
+            TextView perms = text("Permissions: " + join(", ", r.dangerousPermissions), 12, muted, false);
+            perms.setPadding(0, dp(4), 0, 0);
+            c.addView(perms);
+        }
+        Button info = button("App info / uninstall", danger_ ? danger : surface, danger_ ? Color.WHITE : fg);
+        if (!danger_) ((GradientDrawable) info.getBackground()).setStroke(dp(1), line);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(10);
+        info.setLayoutParams(lp);
+        info.setPadding(dp(16), 0, dp(16), 0);
+        info.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                runSecurityScan();
+                Intent i = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                i.setData(Uri.parse("package:" + r.packageName));
+                startActivity(i);
             }
         });
+        c.addView(info);
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        cp.bottomMargin = dp(10);
+        c.setLayoutParams(cp);
+        return c;
     }
 
-    private void runSecurityScan() {
-        scanButton.setEnabled(false);
-        scanButton.setText("AUDITING IN PROGRESS...");
-        progressBar.setVisibility(View.VISIBLE);
-        progressBar.setProgress(0);
-        currentFileLabel.setVisibility(View.VISIBLE);
-        findingsContainer.removeAllViews();
-        threatsCount = 0;
+    // --- UI helpers ---------------------------------------------------------------
 
-        new ScanTask().execute();
+    private void setBusy(boolean on, String label) {
+        busy = on;
+        scanButton.setEnabled(!on);
+        updateButton.setEnabled(!on);
+        scanButton.setAlpha(on ? 0.5f : 1f);
+        updateButton.setAlpha(on ? 0.5f : 1f);
+        progress.setVisibility(on ? View.VISIBLE : View.GONE);
+        progress.setIndeterminate(label != null && label.startsWith("Downloading"));
+        progressLabel.setVisibility(on ? View.VISIBLE : View.GONE);
+        if (label != null) progressLabel.setText(label);
     }
 
-    private class ScanTask extends AsyncTask<Void, Integer, List<ScanResult>> {
-        private List<PackageInfo> packages;
-
-        @Override
-        protected void onPreExecute() {
-            PackageManager pm = getPackageManager();
-            packages = pm.getInstalledPackages(PackageManager.GET_PERMISSIONS);
-            totalPackages = packages.size();
-            progressBar.setMax(totalPackages);
-        }
-
-        @Override
-        protected List<ScanResult> doInBackground(Void... voids) {
-            List<ScanResult> results = new ArrayList<>();
-            PackageManager pm = getPackageManager();
-
-            for (int i = 0; i < packages.size(); i++) {
-                PackageInfo pkg = packages.get(i);
-                publishProgress(i + 1);
-
-                String appName = null;
-                try {
-                    ApplicationInfo ai = pm.getApplicationInfo(pkg.packageName, 0);
-                    appName = pm.getApplicationLabel(ai).toString();
-                } catch (Exception ignored) {}
-
-                String[] perms = pkg.requestedPermissions;
-                ScanResult res = AegisScanner.evaluatePackage(pkg.packageName, appName, perms);
-                if (res.riskScore >= 35) {
-                    results.add(res);
-                }
-            }
-            return results;
-        }
-
-        @Override
-        protected void onProgressUpdate(Integer... values) {
-            int current = values[0];
-            progressBar.setProgress(current);
-            metricScanned.setText(current + " Audited");
-            if (current < packages.size()) {
-                currentFileLabel.setText("Checking: " + packages.get(current).packageName);
-            }
-        }
-
-        @Override
-        protected void onPostExecute(List<ScanResult> results) {
-            progressBar.setVisibility(View.GONE);
-            currentFileLabel.setVisibility(View.GONE);
-            scanButton.setEnabled(true);
-            scanButton.setText("START REAL-TIME THREAT AUDIT");
-
-            threatsCount = results.size();
-            if (threatsCount == 0) {
-                statusHeader.setText("● DEVICE FULLY PROTECTED");
-                statusHeader.setTextColor(Color.parseColor("#10B981"));
-                metricThreats.setText("0 Threats");
-                metricThreats.setTextColor(Color.parseColor("#10B981"));
-
-                TextView cleanView = new TextView(MainActivity.this);
-                cleanView.setText("✓ Audit Complete: All " + totalPackages + " installed applications verified clean.\nNo banking overlays, accessibility exploits, or SMS interceptors detected.");
-                cleanView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-                cleanView.setTextColor(Color.parseColor("#10B981"));
-                cleanView.setPadding(dp(16), dp(20), dp(16), dp(20));
-                findingsContainer.addView(cleanView);
-            } else {
-                statusHeader.setText("⚠ THREATS REQUIRE ATTENTION");
-                statusHeader.setTextColor(Color.parseColor("#EF4444"));
-                metricThreats.setText(threatsCount + " Found");
-                metricThreats.setTextColor(Color.parseColor("#EF4444"));
-
-                for (final ScanResult r : results) {
-                    LinearLayout card = createCard();
-                    card.setPadding(dp(16), dp(16), dp(16), dp(16));
-
-                    TextView name = new TextView(MainActivity.this);
-                    name.setText(r.appName + " (" + r.packageName + ")");
-                    name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-                    name.setTextColor(Color.parseColor("#F3F4F6"));
-                    name.setTypeface(Typeface.DEFAULT_BOLD);
-                    card.addView(name);
-
-                    TextView badge = new TextView(MainActivity.this);
-                    badge.setText("Risk Score: " + r.riskScore + "% · " + r.verdict);
-                    badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-                    badge.setTextColor(r.riskScore >= 70 ? Color.parseColor("#EF4444") : Color.parseColor("#F59E0B"));
-                    badge.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-                    badge.setPadding(0, dp(4), 0, 0);
-                    card.addView(badge);
-
-                    if (!r.threats.isEmpty()) {
-                        TextView t = new TextView(MainActivity.this);
-                        StringBuilder sb = new StringBuilder();
-                        for (int i = 0; i < r.threats.size(); i++) {
-                            if (i > 0) sb.append(", ");
-                            sb.append(r.threats.get(i));
-                        }
-                        t.setText("Detected: " + sb.toString());
-                        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-                        t.setTextColor(Color.parseColor("#EF4444"));
-                        t.setPadding(0, dp(2), 0, 0);
-                        card.addView(t);
-                    }
-
-                    // Action Button: Open App Info for quick uninstall
-                    Button manageBtn = new Button(MainActivity.this);
-                    manageBtn.setText("MANAGE / UNINSTALL");
-                    manageBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-                    manageBtn.setTextColor(Color.WHITE);
-                    manageBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
-
-                    GradientDrawable btnDbg = new GradientDrawable();
-                    btnDbg.setColor(Color.parseColor("#EF4444"));
-                    btnDbg.setCornerRadius(dp(8));
-                    manageBtn.setBackground(btnDbg);
-
-                    manageBtn.setOnClickListener(new View.OnClickListener() {
-                        @Override
-                        public void onClick(View v) {
-                            Intent intent = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-                            intent.setData(Uri.parse("package:" + r.packageName));
-                            startActivity(intent);
-                        }
-                    });
-
-                    card.addView(manageBtn);
-                    findingsContainer.addView(card);
-                    addSpace(findingsContainer, 10);
-                }
-            }
-        }
+    private void setStatus(int tint, String title, String body) {
+        ((GradientDrawable) statusCard.getBackground()).setColor(tint);
+        statusTitle.setText(title);
+        statusText.setText(body);
     }
 
-    private LinearLayout createCard() {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor("#141721")); // Card Surface #141721
-        bg.setCornerRadius(dp(16));
-        bg.setStroke(dp(1), Color.parseColor("#222636")); // Tone-stepped border #222636
-        card.setBackground(bg);
-        return card;
+    private void showNote(String msg, int color) {
+        TextView t = text(msg, 13, color, false);
+        t.setPadding(0, 0, 0, dp(10));
+        findings.addView(t, 0);
     }
 
-    private void addSpace(ViewGroup parent, int dpVal) {
+    private LinearLayout vertical() {
+        LinearLayout l = new LinearLayout(this);
+        l.setOrientation(LinearLayout.VERTICAL);
+        return l;
+    }
+
+    private LinearLayout card(int color) {
+        LinearLayout c = vertical();
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(color);
+        d.setCornerRadius(dp(16));
+        d.setStroke(dp(1), line);
+        c.setBackground(d);
+        c.setPadding(dp(18), dp(16), dp(18), dp(16));
+        return c;
+    }
+
+    private TextView stat(LinearLayout row, String label, String value) {
+        LinearLayout c = card(surface);
+        c.setPadding(dp(12), dp(12), dp(12), dp(12));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        if (row.getChildCount() > 0) lp.leftMargin = dp(8);
+        c.setLayoutParams(lp);
+        c.addView(text(label, 11, muted, false));
+        TextView v = text(value, 15, fg, true);
+        v.setPadding(0, dp(4), 0, 0);
+        c.addView(v);
+        row.addView(c);
+        return v;
+    }
+
+    private Button button(String label, int color, int textColor) {
+        Button b = new Button(this);
+        b.setText(label);
+        b.setAllCaps(false);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        b.setTypeface(Typeface.DEFAULT_BOLD);
+        b.setTextColor(textColor);
+        b.setMinHeight(dp(48));
+        b.setGravity(Gravity.CENTER);
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(color);
+        d.setCornerRadius(dp(12));
+        b.setBackground(d);
+        return b;
+    }
+
+    private TextView text(String s, int sp, int color, boolean bold) {
+        TextView t = new TextView(this);
+        t.setText(s);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
+        t.setTextColor(color);
+        if (bold) t.setTypeface(Typeface.DEFAULT_BOLD);
+        return t;
+    }
+
+    private void space(ViewGroup parent, int dpVal) {
         View v = new View(this);
         v.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(dpVal)));
         parent.addView(v);
+    }
+
+    private static String join(String sep, Iterable<String> items) {
+        StringBuilder sb = new StringBuilder();
+        for (String s : items) {
+            if (sb.length() > 0) sb.append(sep);
+            sb.append(s);
+        }
+        return sb.toString();
     }
 
     private int dp(int val) {

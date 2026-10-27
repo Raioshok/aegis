@@ -8,6 +8,12 @@ BIN_DIR="$BASE_DIR/bin"
 
 mkdir -p "$WORK_DIR/gen" "$WORK_DIR/obj" "$WORK_DIR/bin" "$BIN_DIR"
 
+echo "=== 0. Unit-testing scan rules on the JVM ==="
+TEST_OUT="$(mktemp -d)"
+javac -d "$TEST_OUT"     "$WORK_DIR/src/com/aegis/security/ScanResult.java"     "$WORK_DIR/src/com/aegis/security/AegisScanner.java"     "$WORK_DIR/test/com/aegis/security/AegisScannerTest.java"
+java -ea -cp "$TEST_OUT" com.aegis.security.AegisScannerTest
+rm -rf "$TEST_OUT"
+
 echo "=== 1. Generating R.java via aapt ==="
 aapt package -f -m \
     -J "$WORK_DIR/gen" \

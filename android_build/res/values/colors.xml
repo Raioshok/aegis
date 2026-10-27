@@ -1,13 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bg_dark">#0C0D12</color>
-    <color name="card_bg">#141721</color>
-    <color name="border_color">#222636</color>
-    <color name="accent_orange">#FF7222</color>
-    <color name="status_green">#10B981</color>
-    <color name="status_red">#EF4444</color>
-    <color name="status_yellow">#F59E0B</color>
-    <color name="text_primary">#F3F4F6</color>
-    <color name="text_secondary">#9CA3AF</color>
-    <color name="text_muted">#6B7280</color>
+    <!-- Window background shown before the activity draws; matches MainActivity's palette. -->
+    <color name="bg">#F2F5F8</color>
+    <color name="text_primary">#16202B</color>
 </resources>
