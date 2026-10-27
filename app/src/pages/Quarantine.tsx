@@ -40,7 +40,7 @@ export default function Quarantine() {
     <div className="space-y-6 max-w-6xl">
       <SectionTitle
         title="Quarantine Vault"
-        subtitle="Encrypted isolated storage for neutralized threats. Sealed with ChaCha20-Poly1305 AEAD and DPAPI machine keys."
+        subtitle="Files moved here are encrypted with ChaCha20-Poly1305 and cannot run. Restore puts a file back exactly as it was."
         action={
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>
             Refresh
@@ -50,37 +50,37 @@ export default function Quarantine() {
 
       {/* Summary Metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <SpotlightCard className="p-5 bg-white dark:bg-[#12141D] border-[#EAEFF5] dark:border-[#1E2230]">
-          <span className="text-xs text-[#64748B] dark:text-slate-400 font-medium block">Quarantined Objects</span>
-          <span className="text-2xl font-extrabold text-[#1E293B] dark:text-white tab-nums mt-1 block">
+        <SpotlightCard className="p-5 bg-surface border-line">
+          <span className="text-xs text-fg-muted font-medium block">Quarantined Objects</span>
+          <span className="text-2xl font-extrabold text-fg tab-nums mt-1 block">
             <CountUp to={rows.length} />
           </span>
         </SpotlightCard>
-        <SpotlightCard className="p-5 bg-white dark:bg-[#12141D] border-[#EAEFF5] dark:border-[#1E2230]">
-          <span className="text-xs text-[#64748B] dark:text-slate-400 font-medium block">Vault Volume</span>
-          <span className="text-2xl font-extrabold text-[#1E293B] dark:text-white tab-nums mt-1 block">{fmtBytes(totalBytes)}</span>
+        <SpotlightCard className="p-5 bg-surface border-line">
+          <span className="text-xs text-fg-muted font-medium block">Vault Volume</span>
+          <span className="text-2xl font-extrabold text-fg tab-nums mt-1 block">{fmtBytes(totalBytes)}</span>
         </SpotlightCard>
-        <SpotlightCard className="p-5 bg-white dark:bg-[#12141D] border-[#EAEFF5] dark:border-[#1E2230]">
-          <span className="text-xs text-[#64748B] dark:text-slate-400 font-medium block">Vault Encryption</span>
-          <span className="text-base font-bold text-[#059669] dark:text-emerald-400 mt-1 block">ChaCha20-Poly1305</span>
-          <span className="text-[11px] text-[#94A3B8]">DPAPI Machine Key Scope</span>
+        <SpotlightCard className="p-5 bg-surface border-line">
+          <span className="text-xs text-fg-muted font-medium block">Vault Encryption</span>
+          <span className="text-base font-bold text-ok mt-1 block">ChaCha20-Poly1305</span>
+          <span className="text-[11px] text-fg-subtle">Key protected by DPAPI (Windows) or an owner-only file (Linux)</span>
         </SpotlightCard>
       </div>
 
       {/* Filter / Search Bar */}
       <Card className="p-4">
         <div className="flex items-center gap-3">
-          <Search size={18} className="text-[#94A3B8] shrink-0" />
+          <Search size={18} className="text-fg-subtle shrink-0" />
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Search by threat name, filename, path, or SHA-256..."
-            className="flex-1 bg-transparent text-xs text-[#1E293B] outline-none placeholder:text-[#94A3B8] font-medium"
+            className="flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-fg-subtle font-medium"
           />
           {filter && (
             <button
               onClick={() => setFilter("")}
-              className="text-xs text-[#64748B] hover:text-[#1E293B] font-medium"
+              className="text-xs text-fg-muted hover:text-fg font-medium"
             >
               Clear
             </button>
@@ -90,8 +90,8 @@ export default function Quarantine() {
 
       {/* Vault List */}
       <Card className="p-0 overflow-hidden">
-        <div className="px-6 py-4 border-b border-[#EAEFF5] flex items-center justify-between bg-white">
-          <span className="text-sm font-bold text-[#1E293B]">Isolated Artifacts</span>
+        <div className="px-6 py-4 border-b border-line flex items-center justify-between bg-surface">
+          <span className="text-sm font-bold text-fg">Isolated Artifacts</span>
           <Badge color={rows.length > 0 ? "warn" : "ok"}>
             {rows.length === 0 ? "Vault Clean" : `${rows.length} Sealed`}
           </Badge>
@@ -99,18 +99,18 @@ export default function Quarantine() {
 
         {rows.length === 0 ? (
           <div className="p-16 text-center space-y-2">
-            <Lock size={36} className="text-[#10B981] mx-auto opacity-70" />
-            <div className="text-sm font-bold text-[#1E293B]">Quarantine Vault is Clean</div>
-            <p className="text-xs text-[#64748B] max-w-sm mx-auto">
+            <Lock size={36} className="text-ok mx-auto opacity-70" />
+            <div className="text-sm font-bold text-fg">Quarantine Vault is Clean</div>
+            <p className="text-xs text-fg-muted max-w-sm mx-auto">
               No active threat objects have been isolated. When dangerous files are detected, they are moved here securely.
             </p>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="p-10 text-center text-xs text-[#64748B]">
+          <div className="p-10 text-center text-xs text-fg-muted">
             No items matching "{filter}".
           </div>
         ) : (
-          <div className="divide-y divide-[#EAEFF5] dark:divide-[#212533]">
+          <div className="divide-y divide-line">
             {filtered.map((q) => (
               <div
                 key={q.sha256}
@@ -118,47 +118,47 @@ export default function Quarantine() {
                   showMenu(e, [
                     {
                       label: "Restore to Original Location",
-                      icon: <RotateCcw size={14} className="text-emerald-400" />,
+                      icon: <RotateCcw size={14} className="text-ok" />,
                       action: () => act(q.sha256, "restore"),
                     },
                     {
                       label: "Permanently Purge",
-                      icon: <Trash2 size={14} className="text-red-400" />,
+                      icon: <Trash2 size={14} className="text-danger" />,
                       danger: true,
                       action: () => act(q.sha256, "delete"),
                     },
                     {
                       label: "Copy SHA-256 Digest",
-                      icon: <Copy size={14} className="text-slate-400" />,
+                      icon: <Copy size={14} className="text-fg-muted" />,
                       action: () => navigator.clipboard.writeText(q.sha256),
                     },
                     {
                       label: "Copy Original Path",
-                      icon: <FolderOpen size={14} className="text-slate-400" />,
+                      icon: <FolderOpen size={14} className="text-fg-muted" />,
                       action: () => navigator.clipboard.writeText(q.original_path),
                     },
                     {
                       label: "Add Path to Allowlist",
-                      icon: <Shield size={14} className="text-sky-400" />,
+                      icon: <Shield size={14} className="text-info" />,
                       action: () => api.addWhitelist(q.original_path, `Quarantine restored: ${q.threat}`).catch(() => {}),
                     },
                   ]);
                 }}
-                className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-[#F8FAFC] dark:hover:bg-[#1A1E2B] transition-colors cursor-context-menu"
+                className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-surface-2 transition-colors cursor-context-menu"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2.5">
-                    <span className="font-bold text-sm text-[#DC2626] dark:text-red-400">{q.threat}</span>
-                    <span className="text-xs text-[#64748B] dark:text-slate-400 font-mono tab-nums">{fmtBytes(q.size)}</span>
+                    <span className="font-bold text-sm text-danger">{q.threat}</span>
+                    <span className="text-xs text-fg-muted font-mono tab-nums">{fmtBytes(q.size)}</span>
                   </div>
 
-                  <div className="mt-1 font-mono text-xs text-[#1E293B] dark:text-slate-200 truncate" title={q.original_path}>
+                  <div className="mt-1 font-mono text-xs text-fg truncate" title={q.original_path}>
                     {q.original_path}
                   </div>
 
-                  <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[11px] text-[#94A3B8] font-mono">
+                  <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[11px] text-fg-subtle font-mono">
                     <span>Isolated: {fmtTime(q.quarantined_at)}</span>
-                    <span className="truncate max-w-xs text-[#64748B] dark:text-slate-400">SHA256: {q.sha256}</span>
+                    <span className="truncate max-w-xs text-fg-muted">SHA256: {q.sha256}</span>
                   </div>
                 </div>
 

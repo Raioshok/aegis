@@ -91,7 +91,7 @@ export default function Scan() {
     <div className="space-y-6 max-w-6xl">
       <SectionTitle
         title="Scan Center"
-        subtitle="Zero-copy memory mapped threat analysis with YARA-X, Goblin PE/ELF structure inspection, and live threat feed cross-referencing."
+        subtitle="Checks files with YARA-X rules, PE/ELF heuristics, machine learning and the malware hash databases."
       />
 
       {/* Mode Selection — Pure white cards, soft pill badges, orange accents */}
@@ -100,20 +100,20 @@ export default function Scan() {
           onClick={() => !busy && setMode("smart")}
           className={`p-5 rounded-2xl border transition-all duration-200 cursor-pointer shadow-card ${
             mode === "smart"
-              ? "bg-[#FFF8F3] border-[#FFD8BF] shadow-card-hover"
-              : "bg-white border-[#EAEFF5] hover:border-[#CBD5E1]"
+              ? "bg-brand-soft border-brand/30 shadow-card-hover"
+              : "bg-surface border-line hover:border-line"
           }`}
         >
           <div className="flex items-start gap-3.5">
-            <div className={`p-2.5 rounded-xl shrink-0 ${mode === "smart" ? "bg-[#FF7222] text-white" : "bg-[#F8FAFC] text-[#64748B] border border-[#EAEFF5]"}`}>
+            <div className={`p-2.5 rounded-xl shrink-0 ${mode === "smart" ? "bg-brand text-brand-ink" : "bg-surface-2 text-fg-muted border border-line"}`}>
               <Zap size={18} />
             </div>
             <div>
-              <div className="text-sm font-bold text-[#1E293B] flex items-center gap-2">
+              <div className="text-sm font-bold text-fg flex items-center gap-2">
                 Smart Scan
                 {mode === "smart" && <Badge color="accent">Selected</Badge>}
               </div>
-              <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
+              <p className="text-xs text-fg-muted mt-1 leading-relaxed">
                 Targets critical infection vectors: User downloads, desktop artifacts, documents, and memory.
               </p>
             </div>
@@ -124,20 +124,20 @@ export default function Scan() {
           onClick={() => !busy && setMode("full")}
           className={`p-5 rounded-2xl border transition-all duration-200 cursor-pointer shadow-card ${
             mode === "full"
-              ? "bg-[#FFF8F3] border-[#FFD8BF] shadow-card-hover"
-              : "bg-white border-[#EAEFF5] hover:border-[#CBD5E1]"
+              ? "bg-brand-soft border-brand/30 shadow-card-hover"
+              : "bg-surface border-line hover:border-line"
           }`}
         >
           <div className="flex items-start gap-3.5">
-            <div className={`p-2.5 rounded-xl shrink-0 ${mode === "full" ? "bg-[#FF7222] text-white" : "bg-[#F8FAFC] text-[#64748B] border border-[#EAEFF5]"}`}>
+            <div className={`p-2.5 rounded-xl shrink-0 ${mode === "full" ? "bg-brand text-brand-ink" : "bg-surface-2 text-fg-muted border border-line"}`}>
               <HardDrive size={18} />
             </div>
             <div>
-              <div className="text-sm font-bold text-[#1E293B] flex items-center gap-2">
+              <div className="text-sm font-bold text-fg flex items-center gap-2">
                 Full System Scan
                 {mode === "full" && <Badge color="accent">Selected</Badge>}
               </div>
-              <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
+              <p className="text-xs text-fg-muted mt-1 leading-relaxed">
                 Exhaustively traverses root system storage, checking every byte against all 37 rule families.
               </p>
             </div>
@@ -148,20 +148,20 @@ export default function Scan() {
           onClick={() => !busy && setMode("custom")}
           className={`p-5 rounded-2xl border transition-all duration-200 cursor-pointer shadow-card ${
             mode === "custom"
-              ? "bg-[#FFF8F3] border-[#FFD8BF] shadow-card-hover"
-              : "bg-white border-[#EAEFF5] hover:border-[#CBD5E1]"
+              ? "bg-brand-soft border-brand/30 shadow-card-hover"
+              : "bg-surface border-line hover:border-line"
           }`}
         >
           <div className="flex items-start gap-3.5">
-            <div className={`p-2.5 rounded-xl shrink-0 ${mode === "custom" ? "bg-[#FF7222] text-white" : "bg-[#F8FAFC] text-[#64748B] border border-[#EAEFF5]"}`}>
+            <div className={`p-2.5 rounded-xl shrink-0 ${mode === "custom" ? "bg-brand text-brand-ink" : "bg-surface-2 text-fg-muted border border-line"}`}>
               <FolderCog size={18} />
             </div>
             <div>
-              <div className="text-sm font-bold text-[#1E293B] flex items-center gap-2">
+              <div className="text-sm font-bold text-fg flex items-center gap-2">
                 Custom Target
                 {mode === "custom" && <Badge color="accent">Selected</Badge>}
               </div>
-              <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
+              <p className="text-xs text-fg-muted mt-1 leading-relaxed">
                 Audit a specific folder, project workspace, USB drive, or build directory on demand.
               </p>
             </div>
@@ -172,17 +172,17 @@ export default function Scan() {
       {/* Target Input & Action Bar */}
       <Card className="p-5">
         <div className="flex flex-col md:flex-row items-center gap-3">
-          <div className="flex flex-1 items-center gap-2.5 rounded-xl border border-[#EAEFF5] bg-[#F8FAFC] px-4 py-2.5 w-full">
-            <FolderSearch size={18} className="text-[#94A3B8]" />
+          <div className="flex flex-1 items-center gap-2.5 rounded-xl border border-line bg-surface-2 px-4 py-2.5 w-full">
+            <FolderSearch size={18} className="text-fg-subtle" />
             <input
               value={mode === "custom" ? customPath : getTargetPath()}
               disabled={mode !== "custom" || busy}
               onChange={(e) => setCustomPath(e.target.value)}
               placeholder="Select folder or drive path..."
-              className="flex-1 bg-transparent text-xs text-[#1E293B] outline-none placeholder:text-[#94A3B8] disabled:text-[#64748B] disabled:cursor-not-allowed font-mono font-medium"
+              className="flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-fg-subtle disabled:text-fg-muted disabled:cursor-not-allowed font-mono font-medium"
             />
             {mode !== "custom" && (
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] bg-white px-2 py-0.5 rounded border border-[#EAEFF5]">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-fg-subtle bg-surface px-2 py-0.5 rounded border border-line">
                 Auto
               </span>
             )}
@@ -202,7 +202,7 @@ export default function Scan() {
 
         {mode === "custom" && (
           <div className="mt-3.5 flex items-center gap-2">
-            <span className="text-xs text-[#64748B]">Suggested:</span>
+            <span className="text-xs text-fg-muted">Suggested:</span>
             {QUICK_TARGETS.map((q) => (
               <button
                 key={q.label}
@@ -212,7 +212,7 @@ export default function Scan() {
                   else if (q.path === "Temp") setCustomPath("C:\\Windows\\Temp");
                   else setCustomPath(`C:\\Users\\raio\\${q.path}`);
                 }}
-                className="rounded-lg border border-[#EAEFF5] bg-white px-2.5 py-1 text-xs font-medium text-[#475569] hover:text-[#1E293B] hover:border-[#CBD5E1] transition-all font-mono active:scale-[0.96] shadow-sm"
+                className="rounded-lg border border-line bg-surface px-2.5 py-1 text-xs font-medium text-fg-muted hover:text-fg hover:border-line transition-all font-mono active:scale-[0.96] shadow-sm"
               >
                 {q.label}
               </button>
@@ -223,30 +223,30 @@ export default function Scan() {
 
       {/* Real Live Backend Progress Card */}
       {busy && (
-        <Card className="p-6 border-[#FFD8BF] bg-[#FFF8F3] space-y-4 shadow-card">
+        <Card className="p-6 border-brand/30 bg-brand-soft space-y-4 shadow-card">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-[#FF7222] animate-ping" />
-              <div className="text-sm font-bold text-[#1E293B]">Inspecting Filesystem...</div>
+              <span className="h-2.5 w-2.5 rounded-full bg-brand animate-ping" />
+              <div className="text-sm font-bold text-fg">Inspecting Filesystem...</div>
               {progress.total > 0 && (
-                <span className="text-xs font-mono text-[#FF7222] font-bold tab-nums">
+                <span className="text-xs font-mono text-brand font-bold tab-nums">
                   ({progress.scanned} / {progress.total} files)
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-4 text-xs font-mono text-[#64748B] tab-nums font-medium">
+            <div className="flex items-center gap-4 text-xs font-mono text-fg-muted tab-nums font-medium">
               <span>Elapsed: {progress.elapsed_secs}s</span>
               {progress.rate > 0 && <span>Rate: {progress.rate} f/s</span>}
               {progress.threats > 0 && (
-                <span className="text-[#DC2626] font-bold">Threats: {progress.threats}</span>
+                <span className="text-danger font-bold">Threats: {progress.threats}</span>
               )}
             </div>
           </div>
 
           {/* Genuine Dynamic Progress Bar */}
-          <div className="h-2.5 w-full bg-[#E2E8F0] rounded-full overflow-hidden">
+          <div className="h-2.5 w-full bg-line rounded-full overflow-hidden">
             <div
-              className="h-full bg-[#FF7222] transition-all duration-150 ease-out rounded-full"
+              className="h-full bg-brand transition-all duration-150 ease-out rounded-full"
               style={{
                 width: progress.total > 0
                   ? `${Math.max(3, Math.min(100, progress.percent))}%`
@@ -256,9 +256,9 @@ export default function Scan() {
           </div>
 
           {/* Real Live File Path Ticker */}
-          <div className="flex items-center gap-2 text-xs font-mono text-[#64748B] truncate bg-white/70 px-3 py-1.5 rounded-lg border border-[#FFE2CC]">
-            <FileCode size={14} className="text-[#FF7222] shrink-0" />
-            <span className="truncate text-[#1E293B] font-medium">
+          <div className="flex items-center gap-2 text-xs font-mono text-fg-muted truncate bg-surface/70 px-3 py-1.5 rounded-lg border border-brand/30">
+            <FileCode size={14} className="text-brand shrink-0" />
+            <span className="truncate text-fg font-medium">
               {progress.current_file || "Reading file stream..."}
             </span>
           </div>
@@ -267,20 +267,20 @@ export default function Scan() {
 
       {/* Error Card */}
       {err && (
-        <Card className="p-4 border-[#FECACA] bg-[#FEF2F2] flex items-center gap-3">
-          <AlertOctagon size={18} className="text-[#DC2626] shrink-0" />
-          <div className="text-xs text-[#DC2626] font-mono">{err}</div>
+        <Card className="p-4 border-danger/30 bg-danger-soft flex items-center gap-3">
+          <AlertOctagon size={18} className="text-danger shrink-0" />
+          <div className="text-xs text-danger font-mono">{err}</div>
         </Card>
       )}
 
       {/* Report Findings Table */}
       {report && (
         <Card className="p-6 space-y-4">
-          <div className="flex items-center justify-between pb-4 border-b border-[#EAEFF5]">
+          <div className="flex items-center justify-between pb-4 border-b border-line">
             <div className="flex items-center gap-3">
               <div
                 className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-                  report.threats > 0 ? "bg-[#FEF2F2] text-[#DC2626]" : "bg-[#ECFDF5] text-[#059669]"
+                  report.threats > 0 ? "bg-danger-soft text-danger" : "bg-ok-soft text-ok"
                 }`}
               >
                 {report.threats > 0 ? (
@@ -290,12 +290,12 @@ export default function Scan() {
                 )}
               </div>
               <div>
-                <div className="text-base font-bold text-[#1E293B]">
+                <div className="text-base font-bold text-fg">
                   {report.threats > 0
                     ? `Scan Finished: ${report.threats} Threat(s) Identified`
                     : "Scan Finished: Clean (No Threats Found)"}
                 </div>
-                <div className="text-xs text-[#64748B] mt-0.5">
+                <div className="text-xs text-fg-muted mt-0.5">
                   {report.scanned} files inspected in {(report.duration_ms / 1000).toFixed(2)}s
                 </div>
               </div>
@@ -307,13 +307,13 @@ export default function Scan() {
           </div>
 
           {report.results.length === 0 ? (
-            <div className="p-10 text-center text-xs text-[#64748B]">
+            <div className="p-10 text-center text-xs text-fg-muted">
               All inspected files verified clean against YARA-X rules, hash databases, and heuristic analyzers.
             </div>
           ) : (
-            <div className="divide-y divide-[#EAEFF5] overflow-x-auto">
+            <div className="divide-y divide-line overflow-x-auto">
               <table className="w-full text-left text-xs font-mono">
-                <thead className="text-[#64748B] bg-[#F8FAFC] border-b border-[#EAEFF5]">
+                <thead className="text-fg-muted bg-surface-2 border-b border-line">
                   <tr>
                     <th className="px-4 py-3 font-semibold">Threat</th>
                     <th className="px-4 py-3 font-semibold">Path</th>
@@ -321,7 +321,7 @@ export default function Scan() {
                     <th className="px-4 py-3 font-semibold">Severity</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#EAEFF5] dark:divide-[#212533]">
+                <tbody className="divide-y divide-line">
                   {report.results.map((r, i) => (
                     <tr
                       key={i}
@@ -348,13 +348,13 @@ export default function Scan() {
                           },
                         ]);
                       }}
-                      className="hover:bg-[#F8FAFC] dark:hover:bg-[#1A1E2B] transition-colors cursor-context-menu"
+                      className="hover:bg-surface-2 transition-colors cursor-context-menu"
                     >
-                      <td className="px-4 py-3 font-sans font-bold text-[#DC2626] dark:text-red-400">{r.names}</td>
-                      <td className="px-4 py-3 text-[#475569] dark:text-slate-300 truncate max-w-sm" title={r.path}>
+                      <td className="px-4 py-3 font-sans font-bold text-danger">{r.names}</td>
+                      <td className="px-4 py-3 text-fg-muted truncate max-w-sm" title={r.path}>
                         {r.path}
                       </td>
-                      <td className="px-4 py-3 text-[#64748B] dark:text-slate-400">{r.engines}</td>
+                      <td className="px-4 py-3 text-fg-muted">{r.engines}</td>
                       <td className="px-4 py-3">
                         <span className={`font-bold uppercase ${severityColor(r.severity)}`}>
                           {r.severity_label}

@@ -1,463 +1,183 @@
-import { useEffect, useState } from "react";
-import {
-  ShieldCheck,
-  ShieldAlert,
-  Gamepad2,
-  HardDrive,
-  Cpu,
-  Network,
-  Zap,
-  Sliders,
-  CheckCircle2,
-  RefreshCw,
-  Layers,
-  Brain,
-  EyeOff,
-  FileCode2,
-} from "lucide-react";
-import {
-  api,
-  type ProtectionConfig,
-  type GameModeStatus,
-} from "@/lib/api";
-import { Badge, Button, Card, SectionTitle, Switch } from "@/components/ui";
+import { useEffect, useState, type ReactNode } from "react";
+import { api, type ProtectionConfig, type GameModeStatus } from "@/lib/api";
+import { Card, SectionTitle, Switch, Spinner, Badge } from "@/components/ui";
 
 export default function Settings() {
-  const [config, setConfig] = useState<ProtectionConfig>({
-    realtime_filesystem: true,
-    memory_defense: true,
-    network_firewall: true,
-    ransomware_guard: true,
-    cloud_threat_feeds: true,
-    game_mode_enabled: true,
-    game_mode_auto_detect: true,
-    entropy_threshold: 7.2,
-    ml_engine: true,
-    byovd_defense: true,
-    sleep_obfuscation_defense: true,
-  });
-  const [gameMode, setGameMode] = useState<GameModeStatus | null>({
-    is_gaming_active: false,
-    game_mode_enabled: true,
-    auto_detect: true,
-    priority_lowered: false,
-    background_scans_paused: false,
-  });
-  const [autostart, setAutostart] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [savedMessage, setSavedMessage] = useState(false);
-
-  const load = async () => {
-    try {
-      const cfg = await api.getProtectionConfig();
-      const gm = await api.getGameModeStatus();
-      const auto = await api.isAutostartActive();
-      setConfig(cfg);
-      setGameMode(gm);
-      setAutostart(auto);
-    } catch (e) {
-      console.error("Failed to load settings:", e);
-    }
-  };
+  const [config, setConfig] = useState<ProtectionConfig | null>(null);
+  const [gameMode, setGameMode] = useState<GameModeStatus | null>(null);
+  const [autostart, setAutostart] = useState<boolean | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
 
   useEffect(() => {
-    load();
-    const interval = setInterval(() => {
-      api.getGameModeStatus().then(setGameMode).catch(() => {});
-    }, 3000);
-    return () => clearInterval(interval);
+    api.getProtectionConfig().then(setConfig).catch((e) => setError(String(e)));
+    api.isAutostartActive().then(setAutostart).catch(() => setAutostart(null));
+    const poll = () => api.getGameModeStatus().then(setGameMode).catch(() => {});
+    poll();
+    const id = window.setInterval(poll, 3000);
+    return () => window.clearInterval(id);
   }, []);
 
-  const handleSave = async (updated: ProtectionConfig) => {
-    setBusy(true);
+  const save = async (next: ProtectionConfig) => {
+    const prev = config;
+    setConfig(next);
+    setSaving(true);
+    setError(null);
     try {
-      await api.setProtectionConfig(updated);
-      setConfig(updated);
-      const gm = await api.getGameModeStatus();
-      setGameMode(gm);
-      setSavedMessage(true);
-      setTimeout(() => setSavedMessage(false), 2500);
+      await api.setProtectionConfig(next);
+      setSavedAt(Date.now());
+      api.getGameModeStatus().then(setGameMode).catch(() => {});
     } catch (e) {
-      console.error("Failed to save protection config:", e);
+      setConfig(prev);
+      setError(String(e));
     } finally {
-      setBusy(false);
+      setSaving(false);
     }
   };
+  const set = <K extends keyof ProtectionConfig>(key: K, value: ProtectionConfig[K]) => config && save({ ...config, [key]: value });
 
-  const toggleShield = (key: keyof ProtectionConfig) => {
-    if (!config) return;
-    const next = { ...config, [key]: !config[key] };
-    handleSave(next);
-  };
-
-  const handleAutostartToggle = async () => {
-    const next = !autostart;
-    setAutostart(next);
-    await api.toggleAutostart(next);
+  const toggleAutostart = async () => {
+    if (autostart === null) return;
+    try {
+      setAutostart(await api.toggleAutostart(!autostart));
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   if (!config) {
     return (
-      <div className="flex items-center justify-center py-20 text-xs text-[#64748B] font-mono">
-        Loading configuration...
+      <div className="flex items-center justify-center gap-3 py-24 text-sm text-fg-muted">
+        {error ? <span className="text-danger">{error}</span> : <><Spinner /> Loading settings…</>}
       </div>
     );
   }
 
-  const allShieldsActive =
-    config.realtime_filesystem &&
-    config.memory_defense &&
-    config.network_firewall &&
-    config.ransomware_guard;
-
   return (
-    <div className="space-y-6 max-w-6xl">
+    <div className="max-w-3xl space-y-6">
       <SectionTitle
-        title="Shields & Protection Settings"
-        subtitle="Modular security shields, real-time file inspection, and Kaspersky-style Game Mode resource throttling."
+        title="Settings"
+        subtitle="Saved to the Aegis config file. Real-time changes take effect when the aegisd service restarts."
         action={
-          <div className="flex items-center gap-3">
-            {savedMessage && (
-              <span className="text-xs text-[#059669] font-bold flex items-center gap-1.5 bg-[#ECFDF5] px-3 py-1 rounded-full border border-[#A7F3D0]">
-                <CheckCircle2 size={14} /> Settings Saved
-              </span>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={load}
-              disabled={busy}
-            >
-              <RefreshCw size={13} className={busy ? "animate-spin text-[#FF7222]" : ""} /> Refresh
-            </Button>
-          </div>
+          <span className="text-xs text-fg-muted" aria-live="polite">
+            {saving ? "Saving…" : savedAt ? "Saved" : ""}
+          </span>
         }
       />
+      {error && <div className="rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-xs text-danger">{error}</div>}
 
-      {/* Master Real-Time Protection Banner */}
-      <Card
-        className={`p-6 border transition-all ${
-          allShieldsActive
-            ? "border-[#A7F3D0] bg-[#ECFDF5]"
-            : "border-[#FFD8BF] bg-[#FFF8F3]"
-        }`}
-      >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div
-              className={`flex h-12 w-12 items-center justify-center rounded-2xl font-bold shrink-0 ${
-                allShieldsActive
-                  ? "bg-[#10B981] text-white shadow-sm"
-                  : "bg-[#FF7222] text-white shadow-sm"
-              }`}
-            >
-              {allShieldsActive ? <ShieldCheck size={28} /> : <ShieldAlert size={28} />}
-            </div>
-            <div>
-              <div className="text-base font-bold text-[#1E293B] flex items-center gap-2">
-                Real-Time Protection Status
-                <Badge color={allShieldsActive ? "ok" : "warn"}>
-                  {allShieldsActive ? "Fully Armed" : "Partially Armed"}
-                </Badge>
-              </div>
-              <p className="text-xs text-[#64748B] mt-0.5 max-w-xl">
-                {allShieldsActive
-                  ? "Continuous on-access scanning, memory injection interception, and network egress rules are active."
-                  : "One or more defensive shields are currently disabled. Re-enable all shields for optimal defense."}
-              </p>
-            </div>
+      <Section title="Real-time protection">
+        <Toggle label="Check files as they are written" hint="Runs in the aegisd service." checked={config.realtime_enabled} onChange={(v) => set("realtime_enabled", v)} />
+        <Toggle label="Quarantine detections automatically" hint="Otherwise detections are only recorded." checked={config.auto_quarantine} onChange={(v) => set("auto_quarantine", v)} />
+        <Toggle
+          label="Block detected programs before they run"
+          hint="Linux with the fanotify backend: each program launch waits for a scan."
+          checked={config.block_exec}
+          onChange={(v) => set("block_exec", v)}
+        />
+      </Section>
+
+      <Section title="Ransomware guard">
+        <Toggle label="Watch for mass encryption and decoy tampering" checked={config.ransomware_guard} onChange={(v) => set("ransomware_guard", v)} />
+        <Toggle
+          label="Stop the offending process"
+          hint="Needs a backend that reports the process (Linux fanotify)."
+          checked={config.ransomware_auto_kill}
+          disabled={!config.ransomware_guard}
+          onChange={(v) => set("ransomware_auto_kill", v)}
+        />
+      </Section>
+
+      <Section title="Detection">
+        <Toggle label="Download threat databases daily" hint="abuse.ch MalwareBazaar and Feodo Tracker, LOLDrivers." checked={config.auto_update_feeds} onChange={(v) => set("auto_update_feeds", v)} />
+        <Toggle label="Machine-learning engine" hint="Gradient boosted trees over PE file structure." checked={config.ml_engine} onChange={(v) => set("ml_engine", v)} />
+        <div className="flex items-center justify-between gap-6 px-5 py-4">
+          <div>
+            <div className="text-[13px] font-medium">Packed-file entropy threshold</div>
+            <div className="mt-0.5 text-xs text-fg-muted">Lower flags more files as packed (more detections, more false alarms).</div>
           </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              variant={allShieldsActive ? "outline" : "primary"}
-              size="sm"
-              onClick={() => {
-                const next = {
-                  ...config,
-                  realtime_filesystem: !allShieldsActive,
-                  memory_defense: !allShieldsActive,
-                  network_firewall: !allShieldsActive,
-                  ransomware_guard: !allShieldsActive,
-                  cloud_threat_feeds: !allShieldsActive,
-                };
-                handleSave(next);
-              }}
-            >
-              {allShieldsActive ? "Disable All Shields" : "Enable All Shields"}
-            </Button>
+          <div className="flex shrink-0 items-center gap-3">
+            <input
+              type="range"
+              min={6}
+              max={8}
+              step={0.05}
+              value={config.entropy_threshold}
+              onChange={(e) => setConfig({ ...config, entropy_threshold: Number(e.target.value) })}
+              onPointerUp={() => save(config)}
+              onKeyUp={() => save(config)}
+              aria-label="Entropy threshold"
+              className="w-36 cursor-pointer accent-brand"
+            />
+            <span className="w-10 text-right text-xs tabular-nums">{config.entropy_threshold.toFixed(2)}</span>
           </div>
         </div>
-      </Card>
+      </Section>
 
-      {/* Kaspersky-Style Gaming Mode Console */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-bold text-[#1E293B] flex items-center gap-2">
-            <Gamepad2 size={18} className="text-[#FF7222]" />
-            Game Mode (Resource Throttling)
-          </h2>
-          <Badge color={gameMode?.priority_lowered ? "ok" : "neutral"}>
-            {gameMode?.priority_lowered
-              ? "Resource Throttled (Game Mode Active)"
-              : "Desktop Mode (Full Performance)"}
-          </Badge>
-        </div>
-
-        <Card className="p-6 space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#EAEFF5]">
-            <div>
-              <div className="text-sm font-bold text-[#1E293B] flex items-center gap-2">
-                Game Mode Master Control
-                {gameMode?.is_gaming_active && (
-                  <span className="text-[11px] font-mono font-bold text-[#059669]">
-                    [🎮 Direct3D / Fullscreen App Detected]
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-[#64748B] mt-1 max-w-xl">
-                Automatically detects when full-screen Direct3D games or GPU applications are running.
-                Lowers Aegis CPU priority to IDLE, pauses background scans, and suppresses notifications.
-              </p>
-            </div>
-            <Switch
-              checked={config.game_mode_enabled}
-              onChange={() => toggleShield("game_mode_enabled")}
-              label="Enable Game Mode"
-            />
+      <Section title="Game mode">
+        <Toggle
+          label="Lower Aegis priority and pause scheduled scans while gaming"
+          checked={config.game_mode_enabled}
+          onChange={(v) => set("game_mode_enabled", v)}
+        />
+        <Toggle
+          label="Only when a full-screen app is detected"
+          checked={config.game_mode_auto_detect}
+          disabled={!config.game_mode_enabled}
+          onChange={(v) => set("game_mode_auto_detect", v)}
+        />
+        {gameMode && (
+          <div className="flex flex-wrap gap-2 px-5 py-3.5 text-xs">
+            <Badge color={gameMode.is_gaming_active ? "accent" : "neutral"}>{gameMode.is_gaming_active ? "Full-screen app detected" : "No full-screen app"}</Badge>
+            <Badge color={gameMode.priority_lowered ? "ok" : "neutral"}>{gameMode.priority_lowered ? "Priority lowered" : "Normal priority"}</Badge>
+            <Badge color={gameMode.background_scans_paused ? "ok" : "neutral"}>{gameMode.background_scans_paused ? "Scheduled scans paused" : "Scheduled scans run"}</Badge>
           </div>
+        )}
+      </Section>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="flex items-center justify-between p-4 rounded-xl bg-[#F8FAFC] border border-[#EAEFF5]">
-              <div>
-                <span className="text-xs font-bold text-[#1E293B] block">Auto-Detect Fullscreen & D3D</span>
-                <span className="text-[11px] text-[#64748B] block mt-0.5">
-                  Uses Windows SHQueryUserNotificationState
-                </span>
-              </div>
-              <Switch
-                checked={config.game_mode_auto_detect}
-                onChange={() => toggleShield("game_mode_auto_detect")}
-                disabled={!config.game_mode_enabled}
-                label="Auto Detect"
-              />
-            </div>
+      <Section title="Startup">
+        <Toggle
+          label="Open Aegis when I sign in"
+          hint={autostart === null ? "Could not read the startup setting." : undefined}
+          checked={autostart ?? false}
+          disabled={autostart === null}
+          onChange={toggleAutostart}
+        />
+      </Section>
+    </div>
+  );
+}
 
-            <div className="flex items-center justify-between p-4 rounded-xl bg-[#F8FAFC] border border-[#EAEFF5]">
-              <div>
-                <span className="text-xs font-bold text-[#1E293B] block">Aegis CPU Priority Status</span>
-                <span className="text-[11px] text-[#64748B] block mt-0.5 font-mono">
-                  {gameMode?.priority_lowered ? "IDLE_PRIORITY_CLASS (Throttled)" : "NORMAL_PRIORITY_CLASS"}
-                </span>
-              </div>
-              <Badge color={gameMode?.priority_lowered ? "ok" : "neutral"}>
-                {gameMode?.priority_lowered ? "Low CPU" : "Normal"}
-              </Badge>
-            </div>
-          </div>
-        </Card>
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section>
+      <h2 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wider text-fg-subtle">{title}</h2>
+      <Card className="divide-y divide-line p-0">{children}</Card>
+    </section>
+  );
+}
+
+function Toggle({
+  label,
+  hint,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-6 px-5 py-4">
+      <div className={disabled ? "opacity-50" : ""}>
+        <div className="text-[13px] font-medium">{label}</div>
+        {hint && <div className="mt-0.5 text-xs text-fg-muted">{hint}</div>}
       </div>
-
-      {/* Individual Modular Shields */}
-      <div className="space-y-3">
-        <h2 className="text-sm font-bold text-[#1E293B] flex items-center gap-2">
-          <Layers size={18} className="text-[#FF7222]" />
-          Modular Defensive Shields
-        </h2>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* File System Shield */}
-          <Card className="p-5 flex items-start justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#ECFDF5] text-[#059669] shrink-0">
-                <HardDrive size={20} />
-              </div>
-              <div>
-                <div className="text-sm font-bold text-[#1E293B]">File System Shield</div>
-                <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
-                  Scans files in real time on open, write, and execute using zero-copy memory mapping.
-                </p>
-              </div>
-            </div>
-            <Switch
-              checked={config.realtime_filesystem}
-              onChange={() => toggleShield("realtime_filesystem")}
-              label="Toggle File Shield"
-            />
-          </Card>
-
-          {/* Memory & Injection Defense */}
-          <Card className="p-5 flex items-start justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#EFF6FF] text-[#2563EB] shrink-0">
-                <Cpu size={20} />
-              </div>
-              <div>
-                <div className="text-sm font-bold text-[#1E293B]">Memory & Thread Defense</div>
-                <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
-                  Detects unbacked private threads, thread context/RIP hijacking, and AMSI/ETW unhooking.
-                </p>
-              </div>
-            </div>
-            <Switch
-              checked={config.memory_defense}
-              onChange={() => toggleShield("memory_defense")}
-              label="Toggle Memory Defense"
-            />
-          </Card>
-
-          {/* Network & Host Firewall */}
-          <Card className="p-5 flex items-start justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#FFF4EC] text-[#FF7222] shrink-0">
-                <Network size={20} />
-              </div>
-              <div>
-                <div className="text-sm font-bold text-[#1E293B]">Host Firewall & LOLBin Guard</div>
-                <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
-                  Enforces WFP application filters, blocks unauthorized LOLBin network egress, and detects port scans.
-                </p>
-              </div>
-            </div>
-            <Switch
-              checked={config.network_firewall}
-              onChange={() => toggleShield("network_firewall")}
-              label="Toggle Firewall"
-            />
-          </Card>
-
-          {/* Ransomware Guard */}
-          <Card className="p-5 flex items-start justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#FEF2F2] text-[#DC2626] shrink-0">
-                <Zap size={20} />
-              </div>
-              <div>
-                <div className="text-sm font-bold text-[#1E293B]">Ransomware Watchdog & Rollback</div>
-                <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
-                  Traps burst encryption storms, shadow-copy destruction commands, and initiates rollback.
-                </p>
-              </div>
-            </div>
-            <Switch
-              checked={config.ransomware_guard}
-              onChange={() => toggleShield("ransomware_guard")}
-              label="Toggle Ransomware Guard"
-            />
-          </Card>
-
-          {/* On-Device Machine Learning Shield */}
-          <Card className="p-5 flex items-start justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#F5F3FF] text-[#7C3AED] shrink-0">
-                <Brain size={20} />
-              </div>
-              <div>
-                <div className="text-sm font-bold text-[#1E293B]">On-Device Machine Learning (GBDT)</div>
-                <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
-                  Pure-Rust flat-tree array evaluator running on EMBER 2024 / SOREL-20M features (&lt;40μs inference latency).
-                </p>
-              </div>
-            </div>
-            <Switch
-              checked={config.ml_engine}
-              onChange={() => toggleShield("ml_engine")}
-              label="Toggle ML Engine"
-            />
-          </Card>
-
-          {/* BYOVD Driver Shield */}
-          <Card className="p-5 flex items-start justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#FFF1F2] text-[#E11D48] shrink-0">
-                <FileCode2 size={20} />
-              </div>
-              <div>
-                <div className="text-sm font-bold text-[#1E293B]">BYOVD Driver Blocklist (LOLDrivers)</div>
-                <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
-                  Intercepts vulnerable signed kernel drivers (RTCore64, gdrv, dbutil, mhyprot2) before driver service load.
-                </p>
-              </div>
-            </div>
-            <Switch
-              checked={config.byovd_defense}
-              onChange={() => toggleShield("byovd_defense")}
-              label="Toggle BYOVD Shield"
-            />
-          </Card>
-
-          {/* In-Memory Evasion Shield */}
-          <Card className="p-5 flex items-start justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#F0FDF4] text-[#16A34A] shrink-0">
-                <EyeOff size={20} />
-              </div>
-              <div>
-                <div className="text-sm font-bold text-[#1E293B]">In-Memory Evasion & Sleep Shield</div>
-                <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
-                  Inspects thread wait-states for sleep obfuscation (Ekko/Foliage), synthetic stack frames, and PoolParty injection.
-                </p>
-              </div>
-            </div>
-            <Switch
-              checked={config.sleep_obfuscation_defense}
-              onChange={() => toggleShield("sleep_obfuscation_defense")}
-              label="Toggle Evasion Shield"
-            />
-          </Card>
-        </div>
-      </div>
-
-      {/* System Startup & Heuristic Sensitivity */}
-      <div className="space-y-3">
-        <h2 className="text-sm font-bold text-[#1E293B] flex items-center gap-2">
-          <Sliders size={18} className="text-[#FF7222]" />
-          Engine & Platform Controls
-        </h2>
-
-        <Card className="p-6 space-y-4">
-          <div className="flex items-center justify-between pb-4 border-b border-[#EAEFF5]">
-            <div>
-              <span className="text-sm font-bold text-[#1E293B] block">Start Aegis with Windows</span>
-              <span className="text-xs text-[#64748B] block mt-0.5">
-                Registers background service and startup task with highest privileges.
-              </span>
-            </div>
-            <Switch
-              checked={autostart}
-              onChange={handleAutostartToggle}
-              label="Start on Logon"
-            />
-          </div>
-
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <span className="text-sm font-bold text-[#1E293B] block">Shannon Entropy Packer Threshold</span>
-              <span className="text-xs text-[#64748B] block mt-0.5">
-                Binaries with entropy above this threshold are flagged as encrypted or packed (default: 7.20).
-              </span>
-            </div>
-            <div className="flex items-center gap-3">
-              <input
-                type="range"
-                min="7.0"
-                max="7.9"
-                step="0.05"
-                value={config.entropy_threshold}
-                onChange={(e) => {
-                  const val = parseFloat(e.target.value);
-                  const next = { ...config, entropy_threshold: val };
-                  handleSave(next);
-                }}
-                className="w-36 accent-[#FF7222] cursor-pointer"
-              />
-              <span className="text-xs font-mono font-bold text-[#FF7222] tab-nums w-10">
-                {config.entropy_threshold.toFixed(2)}
-              </span>
-            </div>
-          </div>
-        </Card>
-      </div>
+      <Switch checked={checked} onChange={onChange} disabled={disabled} label={label} />
     </div>
   );
 }

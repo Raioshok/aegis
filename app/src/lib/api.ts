@@ -21,6 +21,10 @@ export interface Dashboard {
   quarantine_count: number;
   engines: EngineInfo[];
   realtime: RealtimeInfo | null;
+  /** Unix seconds of the last threat-feed download; null = never synced. */
+  last_feed_sync: number | null;
+  /** Known vulnerable-driver hashes (0 on Linux). */
+  vulnerable_driver_signatures: number;
 }
 export interface ThreatRow {
   severity: number;
@@ -150,28 +154,31 @@ export interface ProcessDagSnapshot {
   trees: ProcessTreeNodeDto[];
 }
 
-export interface VulnerabilityItem {
+export type CheckState = "pass" | "fail" | "unknown";
+
+export interface HardeningCheck {
   id: string;
   title: string;
   category: string;
-  severity: string;
+  severity: "Critical" | "High" | "Medium" | "Low";
+  state: CheckState;
+  /** What was actually read on this machine. */
   detail: string;
-  status: string;
   fixable: boolean;
 }
 
 export interface SecurityAuditReport {
   overall_score: number;
-  items: VulnerabilityItem[];
+  items: HardeningCheck[];
   issues_count: number;
 }
 
-export interface FeedSyncResult {
-  success: boolean;
-  hashes_updated: number;
-  ips_updated: number;
-  yara_rules_version: string;
-  message: string;
+export interface SyncReport {
+  malware_hashes: number;
+  c2_ips: number;
+  vulnerable_drivers: number;
+  /** One message per feed that failed; the previous copy is kept. */
+  errors: string[];
 }
 
 export const api = {
@@ -198,7 +205,9 @@ export const api = {
   killProcess: (pid: number) => invoke<void>("kill_process", { pid }),
   inspectProcessMemory: (pid: number) => invoke<ThreatRow[]>("inspect_process_memory", { pid }),
   securityAudit: () => invoke<SecurityAuditReport>("security_audit"),
-  syncThreatFeeds: () => invoke<FeedSyncResult>("sync_threat_feeds"),
+  applyHardeningFix: (id: string) => invoke<void>("apply_hardening_fix", { id }),
+  driverAudit: () => invoke<ThreatRow[]>("driver_audit"),
+  syncThreatFeeds: () => invoke<SyncReport>("sync_threat_feeds"),
   deployHoneypot: () => invoke<string>("deploy_ransomware_honeypot"),
   getProtectionConfig: () => invoke<ProtectionConfig>("get_protection_config"),
   setProtectionConfig: (dto: ProtectionConfig) => invoke<void>("set_protection_config", { dto }),
@@ -247,17 +256,18 @@ export interface ScanProgress {
 }
 
 export interface ProtectionConfig {
-  realtime_filesystem: boolean;
-  memory_defense: boolean;
-  network_firewall: boolean;
+  /** Applies when aegisd (re)starts. */
+  realtime_enabled: boolean;
+  auto_quarantine: boolean;
+  /** Linux fanotify backend only. */
+  block_exec: boolean;
   ransomware_guard: boolean;
-  cloud_threat_feeds: boolean;
+  ransomware_auto_kill: boolean;
+  auto_update_feeds: boolean;
+  ml_engine: boolean;
   game_mode_enabled: boolean;
   game_mode_auto_detect: boolean;
   entropy_threshold: number;
-  ml_engine: boolean;
-  byovd_defense: boolean;
-  sleep_obfuscation_defense: boolean;
 }
 
 export interface GameModeStatus {
@@ -273,7 +283,7 @@ export function impactColor(i: number): string {
     case 0:
       return "text-ok";
     case 1:
-      return "text-accent";
+      return "text-info";
     case 2:
       return "text-warn";
     default:
@@ -291,7 +301,7 @@ export function severityColor(sev: number): string {
     case 3:
       return "text-danger";
     default:
-      return "text-crit";
+      return "text-danger";
   }
 }
 

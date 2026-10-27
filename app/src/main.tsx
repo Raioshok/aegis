@@ -30,13 +30,13 @@ class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="p-8 m-8 bg-red-50 border border-red-200 rounded-2xl text-red-900 font-mono text-xs">
-          <h2 className="text-base font-bold text-red-600 mb-2">Rendering Error Caught</h2>
+        <div className="p-8 m-8 bg-danger-soft border border-danger/30 rounded-2xl text-danger font-mono text-xs">
+          <h2 className="text-base font-bold text-danger mb-2">Rendering Error Caught</h2>
           <pre className="whitespace-pre-wrap">{this.state.error?.toString()}</pre>
-          <pre className="mt-4 text-[10px] text-red-500 overflow-auto">{this.state.error?.stack}</pre>
+          <pre className="mt-4 text-[10px] text-danger overflow-auto">{this.state.error?.stack}</pre>
           <button
             onClick={() => window.location.reload()}
-            className="mt-4 px-4 py-2 bg-red-600 text-white rounded-xl text-xs font-bold"
+            className="mt-4 px-4 py-2 bg-danger text-white rounded-xl text-xs font-bold"
           >
             Reload Application
           </button>

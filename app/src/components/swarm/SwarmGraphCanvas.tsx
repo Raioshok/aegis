@@ -264,7 +264,7 @@ export const SwarmGraphCanvas: React.FC<SwarmGraphProps> = ({
               ctx.beginPath();
               ctx.arc(n.x, n.y, n.radius + 8, 0, Math.PI * 2);
               ctx.fillStyle = isSelected
-                ? "rgba(255, 114, 34, 0.25)"
+                ? "rgba(0, 150, 120, 0.25)"
                 : n.is_agent
                 ? "rgba(139, 92, 246, 0.2)"
                 : "rgba(239, 68, 68, 0.25)";
@@ -274,7 +274,7 @@ export const SwarmGraphCanvas: React.FC<SwarmGraphProps> = ({
             // Node Circle
             ctx.beginPath();
             ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
-            ctx.fillStyle = isSelected ? "#FF7222" : n.color;
+            ctx.fillStyle = isSelected ? "#009678" : n.color;
             ctx.fill();
 
             ctx.lineWidth = isSelected ? 2.5 : 1.5;
@@ -409,7 +409,7 @@ export const SwarmGraphCanvas: React.FC<SwarmGraphProps> = ({
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-[540px] rounded-[18px] border border-[#1E2230] bg-[#0E1017] overflow-hidden select-none"
+      className="relative w-full h-[540px] rounded-[18px] border border-line bg-surface-2 overflow-hidden select-none"
     >
       {/* Background Subtle Radar Grid */}
       <div className="absolute inset-0 pointer-events-none opacity-20 bg-[radial-gradient(#2A3042_1px,transparent_1px)] [background-size:24px_24px]" />
@@ -418,7 +418,7 @@ export const SwarmGraphCanvas: React.FC<SwarmGraphProps> = ({
       <div className="absolute top-4 left-4 z-20 flex items-center gap-2">
         <button
           onClick={() => setIsRunning(!isRunning)}
-          className="flex items-center gap-1.5 rounded-lg border border-[#232738] bg-[#141721]/90 px-3 py-1.5 text-xs font-semibold text-slate-200 backdrop-blur-md hover:bg-[#1E2230] hover:text-white transition-all active:scale-95"
+          className="flex items-center gap-1.5 rounded-lg border border-line bg-surface-2/90 px-3 py-1.5 text-xs font-semibold text-fg backdrop-blur-md hover:bg-surface-2 hover:text-fg transition-all active:scale-95"
         >
           {isRunning ? <Pause size={13} /> : <Play size={13} />}
           <span>{isRunning ? "Pause Swarm" : "Resume"}</span>
@@ -429,19 +429,19 @@ export const SwarmGraphCanvas: React.FC<SwarmGraphProps> = ({
             setZoom(1.0);
             setPan({ x: 0, y: 0 });
           }}
-          className="p-1.5 rounded-lg border border-[#232738] bg-[#141721]/90 text-slate-300 backdrop-blur-md hover:bg-[#1E2230] hover:text-white transition-all active:scale-95"
+          className="p-1.5 rounded-lg border border-line bg-surface-2/90 text-fg-muted backdrop-blur-md hover:bg-surface-2 hover:text-fg transition-all active:scale-95"
           title="Reset Zoom & Pan"
         >
           <RotateCcw size={14} />
         </button>
 
         {/* Filter Pills */}
-        <div className="flex items-center rounded-lg border border-[#232738] bg-[#141721]/90 p-0.5 text-[11px] font-medium backdrop-blur-md">
+        <div className="flex items-center rounded-lg border border-line bg-surface-2/90 p-0.5 text-[11px] font-medium backdrop-blur-md">
           <button
             onClick={() => setFilterMode("all")}
             className={cn(
               "px-2.5 py-1 rounded-md transition-colors",
-              filterMode === "all" ? "bg-[#FF7222] text-white font-bold" : "text-slate-400 hover:text-white"
+              filterMode === "all" ? "bg-brand text-brand-ink font-bold" : "text-fg-muted hover:text-fg"
             )}
           >
             All Swarm ({nodesRef.current.length})
@@ -450,7 +450,7 @@ export const SwarmGraphCanvas: React.FC<SwarmGraphProps> = ({
             onClick={() => setFilterMode("agents")}
             className={cn(
               "flex items-center gap-1 px-2.5 py-1 rounded-md transition-colors",
-              filterMode === "agents" ? "bg-purple-600 text-white font-bold" : "text-purple-400 hover:text-purple-300"
+              filterMode === "agents" ? "bg-violet text-white font-bold" : "text-violet hover:text-violet"
             )}
           >
             <Bot size={12} />
@@ -460,7 +460,7 @@ export const SwarmGraphCanvas: React.FC<SwarmGraphProps> = ({
             onClick={() => setFilterMode("threats")}
             className={cn(
               "flex items-center gap-1 px-2.5 py-1 rounded-md transition-colors",
-              filterMode === "threats" ? "bg-red-600 text-white font-bold" : "text-red-400 hover:text-red-300"
+              filterMode === "threats" ? "bg-danger text-white font-bold" : "text-danger hover:text-danger"
             )}
           >
             <ShieldAlert size={12} />
@@ -470,20 +470,20 @@ export const SwarmGraphCanvas: React.FC<SwarmGraphProps> = ({
       </div>
 
       {/* Floating Zoom Controls (Bottom-Right) */}
-      <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1 rounded-lg border border-[#232738] bg-[#141721]/90 p-1 backdrop-blur-md">
+      <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1 rounded-lg border border-line bg-surface-2/90 p-1 backdrop-blur-md">
         <button
           onClick={() => setZoom((z) => Math.min(2.5, z * 1.2))}
-          className="p-1.5 rounded-md text-slate-300 hover:bg-[#1E2230] hover:text-white transition-all active:scale-95"
+          className="p-1.5 rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg transition-all active:scale-95"
           title="Zoom In"
         >
           <ZoomIn size={14} />
         </button>
-        <span className="px-1 text-[11px] font-mono text-slate-400">
+        <span className="px-1 text-[11px] font-mono text-fg-muted">
           {Math.round(zoom * 100)}%
         </span>
         <button
           onClick={() => setZoom((z) => Math.max(0.4, z * 0.8))}
-          className="p-1.5 rounded-md text-slate-300 hover:bg-[#1E2230] hover:text-white transition-all active:scale-95"
+          className="p-1.5 rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg transition-all active:scale-95"
           title="Zoom Out"
         >
           <ZoomOut size={14} />

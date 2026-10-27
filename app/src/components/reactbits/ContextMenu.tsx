@@ -97,7 +97,7 @@ export const ContextMenuProvider: React.FC<{ children: React.ReactNode }> = ({ c
               left: position.x,
               zIndex: 9999,
             }}
-            className="w-56 rounded-xl border border-[#232738] bg-[#0E1017]/95 p-1.5 shadow-[0_16px_36px_rgba(0,0,0,0.6)] backdrop-blur-md"
+            className="w-56 rounded-xl border border-line bg-surface-2/95 p-1.5 shadow-[0_16px_36px_rgba(0,0,0,0.6)] backdrop-blur-md"
           >
             <div className="flex flex-col gap-0.5">
               {items.map((item, idx) => (
@@ -110,16 +110,16 @@ export const ContextMenuProvider: React.FC<{ children: React.ReactNode }> = ({ c
                   className={cn(
                     "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors active:scale-[0.98]",
                     item.danger
-                      ? "text-red-400 hover:bg-red-500/15 hover:text-red-300"
-                      : "text-slate-300 hover:bg-[#1A1E2B] hover:text-white"
+                      ? "text-danger hover:bg-danger/15 hover:text-danger"
+                      : "text-fg-muted hover:bg-surface-2 hover:text-fg"
                   )}
                 >
                   <div className="flex items-center gap-2">
-                    <span className="text-slate-400">{item.icon}</span>
+                    <span className="text-fg-muted">{item.icon}</span>
                     <span>{item.label}</span>
                   </div>
                   {item.shortcut && (
-                    <span className="font-mono text-[10px] text-slate-500">
+                    <span className="font-mono text-[10px] text-fg-muted">
                       {item.shortcut}
                     </span>
                   )}

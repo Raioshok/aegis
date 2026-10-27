@@ -46,21 +46,21 @@ function TreeNode({
         onClick={() => onSelect(node.pid)}
         className={`flex items-center justify-between py-2 px-2.5 rounded-xl cursor-pointer transition-colors ${
           isSelected
-            ? "bg-[#FFF4EC] border border-[#FFD8BF]"
-            : "hover:bg-[#F8FAFC] border border-transparent"
+            ? "bg-brand-soft border border-brand/30"
+            : "hover:bg-surface-2 border border-transparent"
         }`}
         style={{ paddingLeft: `${Math.max(10, depth * 20)}px` }}
       >
         <div className="flex items-center gap-2 truncate">
-          <span className="text-[#94A3B8] font-mono text-[11px] w-12 shrink-0">
+          <span className="text-fg-subtle font-mono text-[11px] w-12 shrink-0">
             {depth > 0 ? "└── " : ""}{node.pid}
           </span>
-          <span className="font-sans font-bold text-[#1E293B] truncate">
+          <span className="font-sans font-bold text-fg truncate">
             {node.name}
           </span>
 
           {node.is_agent_context && (
-            <span className="inline-flex items-center gap-1 rounded-md bg-[#F5F3FF] border border-[#DDD6FE] px-1.5 py-0.5 text-[10px] font-sans font-bold text-[#7C3AED]">
+            <span className="inline-flex items-center gap-1 rounded-md bg-violet-soft border border-violet/30 px-1.5 py-0.5 text-[10px] font-sans font-bold text-violet">
               <Bot size={11} />
               {node.agent_type_label || "AI Agent"}
             </span>
@@ -71,7 +71,7 @@ function TreeNode({
               {node.mitre_techniques.slice(0, 2).map((t) => (
                 <span
                   key={t}
-                  className="rounded bg-[#FEF2F2] border border-[#FECACA] px-1 py-0.2 text-[9px] font-mono font-bold text-[#DC2626]"
+                  className="rounded bg-danger-soft border border-danger/30 px-1 py-0.2 text-[9px] font-mono font-bold text-danger"
                 >
                   {t}
                 </span>
@@ -85,11 +85,11 @@ function TreeNode({
             Score: {node.risk_score}
           </Badge>
           {node.is_signed ? (
-            <span className="text-[#059669] text-[10px] font-sans font-semibold hidden md:inline">
+            <span className="text-ok text-[10px] font-sans font-semibold hidden md:inline">
               Signed
             </span>
           ) : (
-            <span className="text-[#94A3B8] text-[10px] font-sans hidden md:inline">
+            <span className="text-fg-subtle text-[10px] font-sans hidden md:inline">
               Unsigned
             </span>
           )}
@@ -97,7 +97,7 @@ function TreeNode({
       </div>
 
       {node.children && node.children.length > 0 && (
-        <div className="border-l border-[#EAEFF5] ml-4 pl-1">
+        <div className="border-l border-line ml-4 pl-1">
           {node.children.map((c) => (
             <TreeNode
               key={c.pid}
@@ -185,13 +185,13 @@ export default function Processes() {
         subtitle="Directed Acyclic Graph (DAG) process lineage tracking, AI Agent context auditing, and in-memory injection forensic analysis."
         action={
           <div className="flex items-center gap-2">
-            <div className="flex items-center rounded-xl bg-[#F1F5F9] dark:bg-[#1A1D27] p-1 border border-[#EAEFF5] dark:border-[#212533]">
+            <div className="flex items-center rounded-xl bg-surface-2 p-1 border border-line">
               <button
                 onClick={() => setViewMode("swarm")}
                 className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
                   viewMode === "swarm"
-                    ? "bg-[#FF7222] text-white shadow-sm font-bold"
-                    : "text-[#64748B] dark:text-[#94A3B8] hover:text-[#1E293B] dark:hover:text-white"
+                    ? "bg-brand text-brand-ink shadow-sm font-bold"
+                    : "text-fg-muted hover:text-fg"
                 }`}
               >
                 <Activity size={13} />
@@ -201,8 +201,8 @@ export default function Processes() {
                 onClick={() => setViewMode("tree")}
                 className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
                   viewMode === "tree"
-                    ? "bg-white dark:bg-[#12141D] text-[#1E293B] dark:text-white shadow-sm font-bold"
-                    : "text-[#64748B] dark:text-[#94A3B8] hover:text-[#1E293B] dark:hover:text-white"
+                    ? "bg-surface text-fg shadow-sm font-bold"
+                    : "text-fg-muted hover:text-fg"
                 }`}
               >
                 <GitBranch size={13} />
@@ -212,8 +212,8 @@ export default function Processes() {
                 onClick={() => setViewMode("table")}
                 className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
                   viewMode === "table"
-                    ? "bg-white dark:bg-[#12141D] text-[#1E293B] dark:text-white shadow-sm font-bold"
-                    : "text-[#64748B] dark:text-[#94A3B8] hover:text-[#1E293B] dark:hover:text-white"
+                    ? "bg-surface text-fg shadow-sm font-bold"
+                    : "text-fg-muted hover:text-fg"
                 }`}
               >
                 <TableIcon size={13} />
@@ -222,7 +222,7 @@ export default function Processes() {
             </div>
 
             <Button variant="outline" size="sm" onClick={refresh} disabled={busy}>
-              <RefreshCw size={14} className={busy ? "animate-spin text-[#FF7222]" : ""} />
+              <RefreshCw size={14} className={busy ? "animate-spin text-brand" : ""} />
               {busy ? "Auditing..." : "Refresh"}
             </Button>
           </div>
@@ -231,24 +231,24 @@ export default function Processes() {
 
       {/* Filter and Summary Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-2.5 rounded-xl border border-[#EAEFF5] bg-white px-3.5 py-2.5 w-full max-w-md shadow-card">
-          <Search size={16} className="text-[#94A3B8]" />
+        <div className="flex items-center gap-2.5 rounded-xl border border-line bg-surface px-3.5 py-2.5 w-full max-w-md shadow-card">
+          <Search size={16} className="text-fg-subtle" />
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter by process name, PID, or image path..."
-            className="flex-1 bg-transparent text-xs text-[#1E293B] outline-none placeholder:text-[#94A3B8] font-mono font-medium"
+            className="flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-fg-subtle font-mono font-medium"
           />
         </div>
-        <div className="flex items-center gap-3 text-xs text-[#64748B] font-mono">
+        <div className="flex items-center gap-3 text-xs text-fg-muted font-mono">
           <span>{dagSnapshot?.total_nodes ?? list.length} Active Nodes</span>
           <span>•</span>
-          <span className="text-[#7C3AED] font-bold flex items-center gap-1">
+          <span className="text-violet font-bold flex items-center gap-1">
             <Bot size={13} />
             {list.filter((p) => p.is_agent_context).length} AI Agent Contexts
           </span>
           <span>•</span>
-          <span className="text-[#DC2626] font-bold">
+          <span className="text-danger font-bold">
             {dagSnapshot?.active_alerts ?? 0} Alerts
           </span>
         </div>
@@ -280,14 +280,14 @@ export default function Processes() {
                     />
                   ))
                 ) : (
-                  <div className="py-20 text-center text-xs text-[#94A3B8]">
+                  <div className="py-20 text-center text-xs text-fg-subtle">
                     Loading Process Execution DAG hierarchy...
                   </div>
                 )}
               </div>
             ) : (
               <table className="w-full text-left text-xs font-mono">
-                <thead className="bg-[#F8FAFC] text-[#64748B] border-b border-[#EAEFF5] sticky top-0">
+                <thead className="bg-surface-2 text-fg-muted border-b border-line sticky top-0">
                   <tr>
                     <th className="px-4 py-3 font-semibold">PID / PPID</th>
                     <th className="px-4 py-3 font-semibold">Process</th>
@@ -296,19 +296,19 @@ export default function Processes() {
                     <th className="px-4 py-3 font-semibold text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#EAEFF5]">
+                <tbody className="divide-y divide-line">
                   {filtered.map((p) => (
                     <tr
                       key={p.pid}
-                      className={`hover:bg-[#F8FAFC] cursor-pointer transition-colors ${
-                        inspectPid === p.pid ? "bg-[#FFF4EC]" : ""
+                      className={`hover:bg-surface-2 cursor-pointer transition-colors ${
+                        inspectPid === p.pid ? "bg-brand-soft" : ""
                       }`}
                       onClick={() => handleInspect(p.pid)}
                     >
-                      <td className="px-4 py-3 text-[#64748B]">
-                        {p.pid} <span className="text-[10px] text-[#94A3B8]">({p.ppid})</span>
+                      <td className="px-4 py-3 text-fg-muted">
+                        {p.pid} <span className="text-[10px] text-fg-subtle">({p.ppid})</span>
                       </td>
-                      <td className="px-4 py-3 text-[#1E293B] font-sans font-bold">
+                      <td className="px-4 py-3 text-fg font-sans font-bold">
                         <div className="truncate max-w-[180px]" title={p.path}>
                           {p.name}
                         </div>
@@ -316,7 +316,7 @@ export default function Processes() {
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap items-center gap-1">
                           {p.is_agent_context && (
-                            <span className="inline-flex items-center gap-1 rounded bg-[#F5F3FF] border border-[#DDD6FE] px-1.5 py-0.5 text-[9px] font-sans font-bold text-[#7C3AED]">
+                            <span className="inline-flex items-center gap-1 rounded bg-violet-soft border border-violet/30 px-1.5 py-0.5 text-[9px] font-sans font-bold text-violet">
                               <Bot size={10} />
                               {p.agent_label || "AI Agent"}
                             </span>
@@ -324,13 +324,13 @@ export default function Processes() {
                           {p.mitre_techniques?.map((t) => (
                             <span
                               key={t}
-                              className="rounded bg-[#FEF2F2] border border-[#FECACA] px-1 text-[9px] font-mono font-bold text-[#DC2626]"
+                              className="rounded bg-danger-soft border border-danger/30 px-1 text-[9px] font-mono font-bold text-danger"
                             >
                               {t}
                             </span>
                           ))}
                           {!p.is_agent_context && (!p.mitre_techniques || p.mitre_techniques.length === 0) && (
-                            <span className="text-[11px] text-[#94A3B8] font-sans">
+                            <span className="text-[11px] text-fg-subtle font-sans">
                               {p.is_signed ? "Standard" : "Unsigned"}
                             </span>
                           )}
@@ -353,14 +353,14 @@ export default function Processes() {
                         <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
                           <button
                             onClick={() => handleInspect(p.pid)}
-                            className="rounded-lg p-1.5 text-[#64748B] hover:text-[#1E293B] hover:bg-[#F1F5F9] transition-colors"
+                            className="rounded-lg p-1.5 text-fg-muted hover:text-fg hover:bg-surface-2 transition-colors"
                             title="Inspect Memory"
                           >
                             <Eye size={15} />
                           </button>
                           <button
                             onClick={() => handleKill(p.pid)}
-                            className="rounded-lg p-1.5 text-[#64748B] hover:text-[#DC2626] hover:bg-[#FEF2F2] transition-colors"
+                            className="rounded-lg p-1.5 text-fg-muted hover:text-danger hover:bg-danger-soft transition-colors"
                             title="Terminate Process"
                           >
                             <Skull size={15} />
@@ -377,36 +377,36 @@ export default function Processes() {
 
         {/* Process Detail Inspector Panel */}
         <Card className="p-6 space-y-4">
-          <div className="flex items-center justify-between border-b border-[#EAEFF5] pb-3">
-            <div className="text-sm font-bold text-[#1E293B]">Forensic Lineage Details</div>
+          <div className="flex items-center justify-between border-b border-line pb-3">
+            <div className="text-sm font-bold text-fg">Forensic Lineage Details</div>
             {inspectPid && (
-              <span className="font-mono text-xs font-bold text-[#FF7222]">PID {inspectPid}</span>
+              <span className="font-mono text-xs font-bold text-brand">PID {inspectPid}</span>
             )}
           </div>
 
           {inspectPid && selectedProcess ? (
             <div className="space-y-4 text-xs font-mono">
-              <div className="space-y-1.5 bg-[#F8FAFC] p-3 rounded-xl border border-[#EAEFF5]">
-                <div className="font-bold text-[#1E293B] font-sans text-sm truncate">
+              <div className="space-y-1.5 bg-surface-2 p-3 rounded-xl border border-line">
+                <div className="font-bold text-fg font-sans text-sm truncate">
                   {selectedProcess.name}
                 </div>
-                <div className="text-[11px] text-[#64748B] break-all">
+                <div className="text-[11px] text-fg-muted break-all">
                   {selectedProcess.path}
                 </div>
                 <div className="flex items-center gap-2 pt-1 font-sans text-[11px]">
-                  <span className="text-[#64748B]">Parent PID:</span>
-                  <span className="font-mono font-bold text-[#1E293B]">{selectedProcess.ppid}</span>
+                  <span className="text-fg-muted">Parent PID:</span>
+                  <span className="font-mono font-bold text-fg">{selectedProcess.ppid}</span>
                 </div>
               </div>
 
               {/* AI Agent Context Card */}
               {selectedProcess.is_agent_context && (
-                <div className="rounded-xl bg-[#F5F3FF] p-3 border border-[#DDD6FE] space-y-1">
-                  <div className="font-bold text-[#7C3AED] font-sans flex items-center gap-1.5">
+                <div className="rounded-xl bg-violet-soft p-3 border border-violet/30 space-y-1">
+                  <div className="font-bold text-violet font-sans flex items-center gap-1.5">
                     <Bot size={14} />
                     <span>{selectedProcess.agent_label || "AI Agent"} Context</span>
                   </div>
-                  <p className="text-[11px] text-[#64748B] font-sans leading-relaxed">
+                  <p className="text-[11px] text-fg-muted font-sans leading-relaxed">
                     This process is operating within an AI coding agent or local LLM runner tree. Tool calls and network egress are continuously audited.
                   </p>
                 </div>
@@ -415,15 +415,15 @@ export default function Processes() {
               {/* MITRE ATT&CK & Risk Factors */}
               {selectedProcess.mitre_techniques && selectedProcess.mitre_techniques.length > 0 && (
                 <div className="space-y-1.5">
-                  <div className="font-sans font-bold text-[#1E293B] text-[11px] flex items-center gap-1">
-                    <ShieldAlert size={14} className="text-[#DC2626]" />
+                  <div className="font-sans font-bold text-fg text-[11px] flex items-center gap-1">
+                    <ShieldAlert size={14} className="text-danger" />
                     <span>MITRE ATT&CK Mapping</span>
                   </div>
                   <div className="flex flex-wrap gap-1">
                     {selectedProcess.mitre_techniques.map((t) => (
                       <span
                         key={t}
-                        className="rounded-md bg-[#FEF2F2] border border-[#FECACA] px-1.5 py-0.5 text-[10px] font-bold text-[#DC2626]"
+                        className="rounded-md bg-danger-soft border border-danger/30 px-1.5 py-0.5 text-[10px] font-bold text-danger"
                       >
                         {t}
                       </span>
@@ -433,8 +433,8 @@ export default function Processes() {
               )}
 
               {selectedProcess.risk_factors && selectedProcess.risk_factors.length > 0 && (
-                <div className="space-y-1 font-sans text-[11px] text-[#64748B] bg-[#FFF8F3] p-2.5 rounded-xl border border-[#FFE2CC]">
-                  <div className="font-bold text-[#EA580C]">Lineage Risk Factors:</div>
+                <div className="space-y-1 font-sans text-[11px] text-fg-muted bg-brand-soft p-2.5 rounded-xl border border-brand/30">
+                  <div className="font-bold text-warn">Lineage Risk Factors:</div>
                   <ul className="list-disc list-inside space-y-0.5">
                     {selectedProcess.risk_factors.map((rf, i) => (
                       <li key={i}>{rf}</li>
@@ -445,25 +445,25 @@ export default function Processes() {
 
               {/* In-Memory Scan Findings */}
               {inspecting ? (
-                <div className="flex items-center gap-2 text-xs text-[#64748B] py-6 justify-center">
+                <div className="flex items-center gap-2 text-xs text-fg-muted py-6 justify-center">
                   <Spinner />
                   <span>Auditing virtual memory pages & thread contexts...</span>
                 </div>
               ) : inspectThreats && inspectThreats.length > 0 ? (
                 <div className="space-y-2.5">
-                  <div className="flex items-center gap-1.5 text-xs text-[#DC2626] font-bold font-sans">
+                  <div className="flex items-center gap-1.5 text-xs text-danger font-bold font-sans">
                     <AlertTriangle size={15} />
                     <span>In-Memory Injections Detected</span>
                   </div>
                   {inspectThreats.map((t, idx) => (
-                    <div key={idx} className="rounded-xl bg-[#FEF2F2] p-2.5 border border-[#FECACA] text-[11px]">
-                      <div className="font-bold text-[#DC2626]">{t.names}</div>
-                      <div className="mt-0.5 text-[#64748B] break-all">{t.path}</div>
+                    <div key={idx} className="rounded-xl bg-danger-soft p-2.5 border border-danger/30 text-[11px]">
+                      <div className="font-bold text-danger">{t.names}</div>
+                      <div className="mt-0.5 text-fg-muted break-all">{t.path}</div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="flex items-center gap-2 text-[#059669] font-sans font-semibold text-xs py-2">
+                <div className="flex items-center gap-2 text-ok font-sans font-semibold text-xs py-2">
                   <ShieldCheck size={16} />
                   <span>No unbacked code or hook tampering detected.</span>
                 </div>
@@ -479,7 +479,7 @@ export default function Processes() {
               </Button>
             </div>
           ) : (
-            <div className="text-center py-24 text-xs text-[#94A3B8] font-sans">
+            <div className="text-center py-24 text-xs text-fg-subtle font-sans">
               Select a process or DAG node to view parent-child lineage, MITRE techniques, and forensic details.
             </div>
           )}

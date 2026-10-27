@@ -2,55 +2,87 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Design tokens as RGB channels so Tailwind can apply opacity (bg-brand/10). */
 @layer base {
   :root {
     color-scheme: light;
+    --bg: 242 245 248;
+    --surface: 255 255 255;
+    --surface-2: 246 248 250;
+    --line: 226 231 237;
+    --fg: 22 32 43;
+    --fg-muted: 88 101 115;
+    --fg-subtle: 137 149 162;
+    --brand: 0 150 120;
+    --brand-ink: 255 255 255;
+    --brand-soft: 228 245 239;
+    --ok: 16 150 96;
+    --ok-soft: 230 246 238;
+    --warn: 196 118 0;
+    --warn-soft: 253 243 224;
+    --danger: 212 56 56;
+    --danger-soft: 252 236 236;
+    --info: 44 108 220;
+    --info-soft: 233 240 252;
+    --violet: 121 77 219;
+    --violet-soft: 241 236 252;
   }
   html.dark {
     color-scheme: dark;
+    --bg: 11 15 20;
+    --surface: 19 25 33;
+    --surface-2: 25 32 42;
+    --line: 36 45 57;
+    --fg: 232 237 242;
+    --fg-muted: 148 161 175;
+    --fg-subtle: 104 117 131;
+    --brand: 38 196 155;
+    --brand-ink: 6 26 21;
+    --brand-soft: 15 44 37;
+    --ok: 52 205 140;
+    --ok-soft: 14 42 31;
+    --warn: 245 181 70;
+    --warn-soft: 48 36 14;
+    --danger: 248 113 113;
+    --danger-soft: 52 22 24;
+    --info: 110 164 255;
+    --info-soft: 20 34 58;
+    --violet: 170 140 250;
+    --violet-soft: 36 28 60;
   }
   html,
   body,
   #root {
     height: 100%;
     margin: 0;
-    transition: background-color 0.2s ease, color 0.2s ease;
-  }
-  html.light,
-  html.light body,
-  html.light #root {
-    background-color: #F6F8FB;
-    color: #1E293B;
-  }
-  html.dark,
-  html.dark body,
-  html.dark #root {
-    background-color: #0C0D12;
-    color: #FFFFFF;
+    background-color: rgb(var(--bg));
+    color: rgb(var(--fg));
   }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     overflow-x: hidden;
   }
+  :focus-visible {
+    outline: 2px solid rgb(var(--brand));
+    outline-offset: 2px;
+  }
 }
 
-/* Modern soft scrollbars */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
-html.light ::-webkit-scrollbar-thumb {
-  background: #CBD5E1;
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--line));
   border-radius: 9999px;
 }
-html.dark ::-webkit-scrollbar-thumb {
-  background: #1E2333;
-  border-radius: 9999px;
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--fg-subtle));
 }
 
 @keyframes shine {
@@ -64,11 +96,16 @@ html.dark ::-webkit-scrollbar-thumb {
 .animate-shine {
   animation: shine 5s linear infinite;
 }
-html.dark ::-webkit-scrollbar-thumb:hover {
-  background: #4A5568;
-}
 
-/* Tabular figures for numbers */
 .tab-nums {
   font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

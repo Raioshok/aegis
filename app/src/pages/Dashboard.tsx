@@ -1,352 +1,272 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
-  Shield,
   ShieldCheck,
-  ChevronRight,
-  HardDrive,
-  Cpu,
-  Zap,
-  Globe,
-  AlertTriangle,
-  ScanLine,
+  ShieldAlert,
+  ScanSearch,
   RefreshCw,
-  CheckCircle2,
-  Brain,
-  FileCode2,
-  Radio,
-  ArrowRight,
+  Bug,
   Lock,
-  GitBranch,
-  Monitor,
+  Cpu,
+  Network,
+  ShieldHalf,
+  Smartphone,
+  Rocket,
+  ListChecks,
+  ChevronRight,
+  Database,
+  Radio,
 } from "lucide-react";
-import {
-  api,
-  type Dashboard as Dash,
-  type ThreatRow,
-} from "@/lib/api";
-import { Card, Button, Badge, StatusHero, StatCard } from "@/components/ui";
-import { useStaggerEnter } from "@/lib/motion";
-import { SpotlightCard, Magnet, CountUp, ShinyText, DecryptedText } from "@/components/reactbits";
+import { api, fmtTime, type Dashboard as DashboardData, type HistoryRow, type SyncReport } from "@/lib/api";
+import { ago, findIssues } from "@/lib/status";
+import { Button, Card, Badge, Spinner } from "@/components/ui";
+import { cn } from "@/lib/utils";
+import type { PageId } from "@/App";
 
-interface DashboardProps {
-  onNavigateScan: () => void;
-  onNavigatePage?: (page: string) => void;
-}
-
-export default function Dashboard({ onNavigateScan, onNavigatePage }: DashboardProps) {
-  const [d, setD] = useState<Dash | null>(null);
-  const [threats, setThreats] = useState<ThreatRow[]>([]);
-  const [busy, setBusy] = useState(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  // GSAP staged entrance for infrequent dashboard load (make-interfaces-feel-better Rule 5)
-  useStaggerEnter(containerRef, ".stagger-card", [d]);
-
-  const load = () => {
-    setBusy(true);
-    Promise.all([
-      api.dashboard().then(setD).catch(() => {}),
-      api.threats(5).then(setThreats).catch(() => {}),
-    ]).finally(() => setBusy(false));
-  };
+export default function Dashboard({
+  data,
+  onNavigate,
+  onRefresh,
+}: {
+  data: DashboardData | null;
+  onNavigate: (p: PageId) => void;
+  onRefresh: () => Promise<unknown>;
+}) {
+  const [history, setHistory] = useState<HistoryRow[] | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [sync, setSync] = useState<SyncReport | string | null>(null);
 
   useEffect(() => {
-    load();
-    const interval = setInterval(load, 3000);
-    return () => clearInterval(interval);
+    api.history(5).then(setHistory).catch(() => setHistory([]));
   }, []);
 
-  const hasIssues = (d?.threats ?? 0) > 0 || threats.length > 0;
-  const threatCount = (d?.threats ?? 0) > 0 ? (d?.threats ?? 0) : threats.length;
+  const updateDatabases = async () => {
+    setSyncing(true);
+    setSync(null);
+    try {
+      setSync(await api.syncThreatFeeds());
+      await onRefresh();
+    } catch (e) {
+      setSync(String(e));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  if (!data || history === null) {
+    return (
+      <div className="flex items-center gap-3 py-24 text-sm text-fg-muted justify-center">
+        <Spinner /> Loading protection status…
+      </div>
+    );
+  }
+
+  const lastScan = history[0];
+  const issues = findIssues(data, lastScan);
+  const healthy = issues.length === 0;
 
   return (
-    <div ref={containerRef} className="space-y-6 max-w-6xl">
-      {/* Top Action Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[#1E293B] dark:text-white [text-wrap:balance]">
-            Endpoint Defense Center
-          </h1>
-          <p className="mt-1 text-xs text-[#64748B] dark:text-[#8491A2] leading-relaxed [text-wrap:pretty]">
-            Real-time hybrid static, behavioral in-memory, and machine learning telemetry status.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <Button
-            variant="outline"
-            size="md"
-            onClick={load}
-            disabled={busy}
-          >
-            <RefreshCw size={14} className={busy ? "animate-spin text-[#FF7222]" : "text-[#64748B] dark:text-[#8491A2]"} />
-            {busy ? "Auditing..." : "Refresh"}
-          </Button>
-
-          <Magnet padding={50} magnetStrength={4}>
-            <Button
-              variant="primary"
-              size="md"
-              onClick={onNavigateScan}
+    <div className="space-y-6">
+      {/* Protection status */}
+      <section
+        className={cn(
+          "relative overflow-hidden rounded-[20px] border p-7",
+          healthy ? "border-brand/20 bg-brand-soft" : "border-warn/25 bg-warn-soft"
+        )}
+      >
+        <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-start gap-5">
+            <div
+              className={cn(
+                "flex h-20 w-20 shrink-0 items-center justify-center rounded-full",
+                healthy ? "bg-brand text-brand-ink shadow-hero" : "bg-warn text-white"
+              )}
             >
-              <ScanLine size={15} />
-              <span>Start Smart Scan</span>
-            </Button>
-          </Magnet>
-        </div>
-      </div>
-
-      {/* Primary Security Posture Hero Banner (The Skins Factory & taste-skill) */}
-      <div className="stagger-card">
-        <StatusHero
-          isArmed={!hasIssues}
-          threatCount={threatCount}
-          activeShields={8}
-          totalShields={8}
-          onPrimaryAction={onNavigateScan}
-          primaryActionLabel={hasIssues ? "Resolve Threats Now" : "Run Smart Scan"}
-          lastScanTime="Just now"
-        />
-      </div>
-
-      {/* Type-First High-Density Metric Strip with ReactBits Spotlight & CountUp */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="stagger-card">
-          <SpotlightCard className="p-4 bg-white dark:bg-[#12141D] border-[#EAEFF5] dark:border-[#1E2230]">
-            <div className="text-[11px] font-mono text-[#64748B] dark:text-slate-400">Total Files Inspected</div>
-            <div className="mt-1 text-2xl font-bold font-mono text-[#1E293B] dark:text-white">
-              <CountUp to={d?.files ?? 1842} />
+              {healthy ? <ShieldCheck size={40} strokeWidth={2} /> : <ShieldAlert size={40} strokeWidth={2} />}
             </div>
-            <div className="mt-1 text-[11px] text-slate-500">Zero-copy mmap2</div>
-          </SpotlightCard>
-        </div>
-        <div className="stagger-card">
-          <SpotlightCard className="p-4 bg-white dark:bg-[#12141D] border-[#EAEFF5] dark:border-[#1E2230]">
-            <div className="text-[11px] font-mono text-[#64748B] dark:text-slate-400">Active Threats</div>
-            <div className={`mt-1 text-2xl font-bold font-mono ${threatCount > 0 ? "text-red-500 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>
-              <CountUp to={threatCount} />
+            <div className="space-y-2">
+              <h1 className="text-2xl font-semibold tracking-tight [text-wrap:balance]">
+                {healthy ? "Your device is protected" : "Your protection needs attention"}
+              </h1>
+              {healthy ? (
+                <p className="text-sm text-fg-muted">
+                  Real-time protection is on ({data.realtime?.backend}). Last scan {ago(lastScan?.finished)}, databases
+                  updated {ago(data.last_feed_sync)}.
+                </p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {issues.map((i) => (
+                    <li key={i.text} className="flex flex-wrap items-center gap-x-3 text-sm text-fg">
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" />
+                      {i.text}
+                      {i.action && (
+                        <button
+                          onClick={() => onNavigate(i.action!.page)}
+                          className="text-sm font-semibold text-brand hover:underline"
+                        >
+                          {i.action.label}
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-            <div className="mt-1 text-[11px] text-slate-500">{threatCount === 0 ? "Clean state" : "Requires triage"}</div>
-          </SpotlightCard>
-        </div>
-        <div className="stagger-card">
-          <SpotlightCard className="p-4 bg-white dark:bg-[#12141D] border-[#EAEFF5] dark:border-[#1E2230]">
-            <div className="text-[11px] font-mono text-[#64748B] dark:text-slate-400">GBDT ML Latency</div>
-            <div className="mt-1 text-2xl font-bold font-mono text-purple-600 dark:text-purple-400">
-              {"< 38 μs"}
-            </div>
-            <div className="mt-1 text-[11px] text-slate-500">14-tree pure Rust</div>
-          </SpotlightCard>
-        </div>
-        <div className="stagger-card">
-          <SpotlightCard className="p-4 bg-white dark:bg-[#12141D] border-[#EAEFF5] dark:border-[#1E2230]">
-            <div className="text-[11px] font-mono text-[#64748B] dark:text-slate-400">LOLDrivers Blocklist</div>
-            <div className="mt-1 text-2xl font-bold font-mono text-emerald-600 dark:text-emerald-400">
-              <CountUp to={706} />
-            </div>
-            <div className="mt-1 text-[11px] text-slate-500">BYOVD shield enforced</div>
-          </SpotlightCard>
-        </div>
-      </div>
-
-      {/* Core Defense Vectors Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        
-        {/* Left Column: Fast Navigation Cards (5 cols) */}
-        <div className="lg:col-span-5 space-y-3 stagger-card">
-          <div className="text-xs font-semibold text-[#64748B] dark:text-[#8491A2] px-1">
-            Defensive Vectors & Quick Navigation
           </div>
-
-          {/* Antivirus & Static Multi-Engine Card */}
-          <Card
-            onClick={() => onNavigatePage?.("scan")}
-            className="p-4 flex items-center justify-between"
-          >
-            <div className="flex items-center gap-3.5">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#F8FAFC] dark:bg-[#1A1D27] border border-[#EAEFF5] dark:border-[#2A3042] text-[#FF7222]">
-                <Shield size={20} strokeWidth={2} />
-              </div>
-              <div className="space-y-0.5">
-                <div className="text-xs font-bold text-[#1E293B] dark:text-white">
-                  Multi-Engine Antivirus
-                </div>
-                <div className="text-[11px] text-[#64748B] dark:text-[#8491A2]">
-                  37 YARA-X rules, SHA-256 binary search & heuristics
-                </div>
-              </div>
-            </div>
-            <ChevronRight size={17} className="text-[#94A3B8]" />
-          </Card>
-
-          {/* Process Execution DAG Card */}
-          <Card
-            onClick={() => onNavigatePage?.("processes")}
-            className="p-4 flex items-center justify-between"
-          >
-            <div className="flex items-center gap-3.5">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#F8FAFC] dark:bg-[#1A1D27] border border-[#EAEFF5] dark:border-[#2A3042] text-[#2563EB]">
-                <GitBranch size={20} strokeWidth={2} />
-              </div>
-              <div className="space-y-0.5">
-                <div className="text-xs font-bold text-[#1E293B] dark:text-white">
-                  Process Execution DAG
-                </div>
-                <div className="text-[11px] text-[#64748B] dark:text-[#8491A2]">
-                  Parent-child lineage scoring & AI agent context
-                </div>
-              </div>
-            </div>
-            <ChevronRight size={17} className="text-[#94A3B8]" />
-          </Card>
-
-          {/* Memory & In-Memory Evasion Card */}
-          <Card
-            onClick={() => onNavigatePage?.("behavior")}
-            className="p-4 flex items-center justify-between"
-          >
-            <div className="flex items-center gap-3.5">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#F8FAFC] dark:bg-[#1A1D27] border border-[#EAEFF5] dark:border-[#2A3042] text-[#7C3AED]">
-                <Cpu size={20} strokeWidth={2} />
-              </div>
-              <div className="space-y-0.5">
-                <div className="text-xs font-bold text-[#1E293B] dark:text-white">
-                  In-Memory Evasion Shield
-                </div>
-                <div className="text-[11px] text-[#64748B] dark:text-[#8491A2]">
-                  FunctionPeekaboo TEB hunter & Module Stomping diff
-                </div>
-              </div>
-            </div>
-            <ChevronRight size={17} className="text-[#94A3B8]" />
-          </Card>
-
-          {/* Network Firewall & DNS Tunneling Card */}
-          <Card
-            onClick={() => onNavigatePage?.("network")}
-            className="p-4 flex items-center justify-between"
-          >
-            <div className="flex items-center gap-3.5">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#F8FAFC] dark:bg-[#1A1D27] border border-[#EAEFF5] dark:border-[#2A3042] text-[#059669]">
-                <Globe size={20} strokeWidth={2} />
-              </div>
-              <div className="space-y-0.5">
-                <div className="text-xs font-bold text-[#1E293B] dark:text-white">
-                  WFP Network Firewall
-                </div>
-                <div className="text-[11px] text-[#64748B] dark:text-[#8491A2]">
-                  DNS tunnel entropy scoring & LOLBin egress block
-                </div>
-              </div>
-            </div>
-            <ChevronRight size={17} className="text-[#94A3B8]" />
-          </Card>
-
-          {/* Cryptographic Quarantine Vault Card */}
-          <Card
-            onClick={() => onNavigatePage?.("quarantine")}
-            className="p-4 flex items-center justify-between"
-          >
-            <div className="flex items-center gap-3.5">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#F8FAFC] dark:bg-[#1A1D27] border border-[#EAEFF5] dark:border-[#2A3042] text-[#EA580C]">
-                <Lock size={20} strokeWidth={2} />
-              </div>
-              <div className="space-y-0.5">
-                <div className="text-xs font-bold text-[#1E293B] dark:text-white">
-                  Quarantine Vault (ChaCha20)
-                </div>
-                <div className="text-[11px] text-[#64748B] dark:text-[#8491A2]">
-                  AEAD authenticated rest encryption with DPAPI keys
-                </div>
-              </div>
-            </div>
-            <ChevronRight size={17} className="text-[#94A3B8]" />
-          </Card>
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-row md:flex-col lg:flex-row">
+            <Button variant="primary" size="lg" onClick={() => onNavigate("scan")}>
+              <ScanSearch size={17} /> Scan
+            </Button>
+            <Button variant="outline" size="lg" onClick={updateDatabases} disabled={syncing}>
+              <RefreshCw size={16} className={syncing ? "animate-spin" : ""} />
+              {syncing ? "Updating…" : "Update databases"}
+            </Button>
+          </div>
         </div>
-
-        {/* Right Column: Live Subsystems Status Matrix (7 cols) */}
-        <div className="lg:col-span-7 space-y-4 stagger-card">
-          <Card className="p-5 space-y-4">
-            <div className="flex items-center justify-between border-b border-[#EAEFF5] dark:border-[#1E2230] pb-3">
-              <div className="text-xs font-bold text-[#1E293B] dark:text-white flex items-center gap-2">
-                <CheckCircle2 size={16} className="text-[#059669]" />
-                <span>Active Subsystem Telemetry Matrix</span>
+        {sync !== null && (
+          <div className="mt-5 rounded-xl border border-line bg-surface px-4 py-3 text-xs">
+            {typeof sync === "string" ? (
+              <span className="text-danger">Update failed: {sync}</span>
+            ) : (
+              <div className="space-y-1">
+                <div className="text-fg">
+                  Loaded {sync.malware_hashes.toLocaleString()} malware hashes, {sync.c2_ips.toLocaleString()} C2 addresses
+                  and {sync.vulnerable_drivers.toLocaleString()} vulnerable-driver hashes.
+                </div>
+                {sync.errors.map((e) => (
+                  <div key={e} className="text-warn">
+                    {e}
+                  </div>
+                ))}
               </div>
-              <span className="text-[11px] font-mono text-[#059669] font-bold">
-                100% OPERATIONAL
-              </span>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* Feature tiles */}
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <Tile icon={<ScanSearch size={20} />} tone="brand" title="Scan" onClick={() => onNavigate("scan")}>
+          {lastScan ? `Last: ${lastScan.files.toLocaleString()} files, ${lastScan.threats} threats, ${ago(lastScan.finished)}` : "No scans yet"}
+        </Tile>
+        <Tile icon={<Bug size={20} />} tone={data.threats > 0 ? "danger" : "ok"} title="Detections" onClick={() => onNavigate("threats")}>
+          {data.threats > 0 ? `${data.threats.toLocaleString()} threats found across ${data.scans} scans` : "Nothing detected so far"}
+        </Tile>
+        <Tile icon={<Lock size={20} />} tone="warn" title="Quarantine" onClick={() => onNavigate("quarantine")}>
+          {data.quarantine_count > 0 ? `${data.quarantine_count} encrypted items` : "Empty"}
+        </Tile>
+        <Tile icon={<Cpu size={20} />} tone="info" title="Processes" onClick={() => onNavigate("processes")}>
+          Process tree, signatures and lineage alerts
+        </Tile>
+        <Tile icon={<Network size={20} />} tone="info" title="Network" onClick={() => onNavigate("network")}>
+          Open connections checked against C2 feeds
+        </Tile>
+        <Tile icon={<ShieldHalf size={20} />} tone="violet" title="Hardening" onClick={() => onNavigate("vulnerabilities")}>
+          {data.vulnerable_driver_signatures > 0
+            ? `OS settings and drivers vs ${data.vulnerable_driver_signatures.toLocaleString()} vulnerable-driver hashes`
+            : "OS security settings audit"}
+        </Tile>
+        <Tile icon={<Smartphone size={20} />} tone="ok" title="Android apps" onClick={() => onNavigate("android")}>
+          Inspect .apk and .dex files
+        </Tile>
+        <Tile icon={<Rocket size={20} />} tone="brand" title="Tune-up" onClick={() => onNavigate("optimize")}>
+          Reclaimable disk space and system tweaks
+        </Tile>
+        <Tile icon={<ListChecks size={20} />} tone="neutral" title="Exclusions" onClick={() => onNavigate("whitelist")}>
+          {data.whitelist_count > 0 ? `${data.whitelist_count} trusted paths` : "No exclusions"}
+        </Tile>
+      </section>
+
+      {/* Components */}
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card className="p-0">
+          <div className="flex items-center gap-2 border-b border-line px-5 py-3.5 text-sm font-semibold">
+            <Database size={16} className="text-fg-muted" /> Detection engines
+          </div>
+          <ul className="divide-y divide-line">
+            {data.engines.map((e) => (
+              <li key={e.name} className="flex items-center justify-between gap-4 px-5 py-3">
+                <span className="text-[13px] font-medium">{e.name}</span>
+                <span className="truncate text-right text-xs text-fg-muted" title={e.status}>
+                  {e.status}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+        <Card className="p-0">
+          <div className="flex items-center gap-2 border-b border-line px-5 py-3.5 text-sm font-semibold">
+            <Radio size={16} className="text-fg-muted" /> Real-time protection
+          </div>
+          {data.daemon_running && data.realtime ? (
+            <dl className="divide-y divide-line text-[13px]">
+              <Row label="State">
+                <Badge color={data.realtime.enabled ? "ok" : "warn"}>{data.realtime.enabled ? "On" : "Off"}</Badge>
+              </Row>
+              <Row label="Watcher">{data.realtime.backend}</Row>
+              <Row label="File events checked">{data.realtime.events_seen.toLocaleString()}</Row>
+              <Row label="Threats blocked">{data.realtime.threats_blocked.toLocaleString()}</Row>
+              <Row label="Total files scanned">{data.files.toLocaleString()}</Row>
+            </dl>
+          ) : (
+            <div className="px-5 py-6 text-[13px] leading-relaxed text-fg-muted">
+              The Aegis service is not running. Start <code className="rounded bg-surface-2 px-1">aegisd</code> to check
+              files as they arrive. Manual scans from this window still work.
             </div>
-
-            <div className="divide-y divide-[#EAEFF5] dark:divide-[#1E2230]">
-              <div className="flex items-center justify-between py-2.5">
-                <div className="flex items-center gap-3">
-                  <Monitor size={16} className="text-[#64748B] dark:text-[#8491A2]" />
-                  <div>
-                    <div className="text-xs font-bold text-[#1E293B] dark:text-white">Windows Kernel & Host Auditor</div>
-                    <div className="text-[11px] text-[#64748B] dark:text-[#8491A2]">NTFS USN journal & Authenticode validation</div>
-                  </div>
-                </div>
-                <Badge color="ok">Enforced</Badge>
-              </div>
-
-              <div className="flex items-center justify-between py-2.5">
-                <div className="flex items-center gap-3">
-                  <HardDrive size={16} className="text-[#64748B] dark:text-[#8491A2]" />
-                  <div>
-                    <div className="text-xs font-bold text-[#1E293B] dark:text-white">Zero-Copy Memory-Mapped Engine</div>
-                    <div className="text-[11px] text-[#64748B] dark:text-[#8491A2]">On-access streaming file verification</div>
-                  </div>
-                </div>
-                <Badge color="ok">Active</Badge>
-              </div>
-
-              <div className="flex items-center justify-between py-2.5">
-                <div className="flex items-center gap-3">
-                  <Brain size={16} className="text-[#7C3AED]" />
-                  <div>
-                    <div className="text-xs font-bold text-[#1E293B] dark:text-white">On-Device Machine Learning (GBDT)</div>
-                    <div className="text-[11px] text-[#64748B] dark:text-[#8491A2]">576-dim EMBER PE feature extractor (&lt;40μs)</div>
-                  </div>
-                </div>
-                <Badge color="ok">Active</Badge>
-              </div>
-
-              <div className="flex items-center justify-between py-2.5">
-                <div className="flex items-center gap-3">
-                  <FileCode2 size={16} className="text-[#DC2626]" />
-                  <div>
-                    <div className="text-xs font-bold text-[#1E293B] dark:text-white">BYOVD Driver Blocklist (LOLDrivers)</div>
-                    <div className="text-[11px] text-[#64748B] dark:text-[#8491A2]">Intercepting RTCore64, gdrv, dbutil, mhyprot2</div>
-                  </div>
-                </div>
-                <Badge color="ok">Enforced</Badge>
-              </div>
-
-              <div className="flex items-center justify-between py-2.5">
-                <div className="flex items-center gap-3">
-                  <Zap size={16} className="text-[#FF7222]" />
-                  <div>
-                    <div className="text-xs font-bold text-[#1E293B] dark:text-white">Ransomware Honeypot & Watchdog</div>
-                    <div className="text-[11px] text-[#64748B] dark:text-[#8491A2]">Sliding window entropy burst & rename-storm traps</div>
-                  </div>
-                </div>
-                <Badge color="ok">Armed</Badge>
-              </div>
-
-              <div className="flex items-center justify-between py-2.5">
-                <div className="flex items-center gap-3">
-                  <Radio size={16} className="text-[#059669]" />
-                  <div>
-                    <div className="text-xs font-bold text-[#1E293B] dark:text-white">Telemetry & Lab In-Guest Gateway</div>
-                    <div className="text-[11px] text-[#64748B] dark:text-[#8491A2]">Port 9090 live ingestion & automated training loop</div>
-                  </div>
-                </div>
-                <Badge color="ok">Listening</Badge>
-              </div>
+          )}
+          {lastScan && (
+            <div className="border-t border-line px-5 py-3 text-xs text-fg-subtle">
+              Last scan finished {fmtTime(lastScan.finished)} · {lastScan.target}
             </div>
-          </Card>
-        </div>
+          )}
+        </Card>
+      </section>
+    </div>
+  );
+}
+
+const TONES = {
+  brand: "bg-brand-soft text-brand",
+  ok: "bg-ok-soft text-ok",
+  warn: "bg-warn-soft text-warn",
+  danger: "bg-danger-soft text-danger",
+  info: "bg-info-soft text-info",
+  violet: "bg-violet-soft text-violet",
+  neutral: "bg-surface-2 text-fg-muted",
+};
+
+function Tile({
+  icon,
+  tone,
+  title,
+  children,
+  onClick,
+}: {
+  icon: ReactNode;
+  tone: keyof typeof TONES;
+  title: string;
+  children: ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="group flex items-center gap-4 rounded-card border border-line bg-surface p-4 text-left shadow-card transition-[box-shadow,border-color] hover:border-fg-subtle/40 hover:shadow-card-hover"
+    >
+      <div className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-xl", TONES[tone])}>{icon}</div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[14px] font-semibold">{title}</div>
+        <div className="mt-0.5 truncate text-xs text-fg-muted">{children}</div>
       </div>
+      <ChevronRight size={18} className="shrink-0 text-fg-subtle transition-transform group-hover:translate-x-0.5" />
+    </button>
+  );
+}
+
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between px-5 py-3">
+      <dt className="text-fg-muted">{label}</dt>
+      <dd className="font-medium tabular-nums">{children}</dd>
     </div>
   );
 }

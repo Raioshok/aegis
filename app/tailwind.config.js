@@ -1,88 +1,35 @@
 /** @type {import('tailwindcss').Config} */
+// Colors are CSS variables (see src/styles.css) so one class works in light and dark.
+const v = (name) => `rgb(var(--${name}) / <alpha-value>)`;
+
 export default {
   darkMode: "class",
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        bg: {
-          DEFAULT: "#F6F8FB",
-          muted: "#EDF2F7",
-          subtle: "#F1F5F9",
-          dark: "#0C0D12",
-        },
-        surface: {
-          DEFAULT: "#FFFFFF",
-          hover: "#F8FAFC",
-          dark: "#13151D",
-          "dark-hover": "#191C26",
-        },
-        card: {
-          DEFAULT: "#FFFFFF",
-          dark: "#13151D",
-        },
-        primary: {
-          DEFAULT: "#FF7222",
-          hover: "#E85D10",
-          light: "#FFF4EC",
-          border: "#FFE2CC",
-        },
-        accent: {
-          DEFAULT: "#FF7222",
-          hover: "#E85D10",
-          light: "#FFF4EC",
-        },
-        ok: {
-          DEFAULT: "#10B981",
-          light: "#ECFDF5",
-          border: "#A7F3D0",
-        },
-        warn: {
-          DEFAULT: "#F59E0B",
-          light: "#FFFBEB",
-          border: "#FDE68A",
-        },
-        danger: {
-          DEFAULT: "#EF4444",
-          light: "#FEF2F2",
-          border: "#FECACA",
-        },
-        fg: {
-          DEFAULT: "#1E293B",
-          muted: "#64748B",
-          subtle: "#94A3B8",
-          dark: "#FFFFFF",
-          "dark-muted": "#8491A2",
-        },
-        border: {
-          DEFAULT: "#E8ECF2",
-          focus: "#FF7222",
-          dark: "#212533",
-        },
+        bg: v("bg"),
+        surface: { DEFAULT: v("surface"), 2: v("surface-2") },
+        line: v("line"),
+        fg: { DEFAULT: v("fg"), muted: v("fg-muted"), subtle: v("fg-subtle") },
+        brand: { DEFAULT: v("brand"), ink: v("brand-ink"), soft: v("brand-soft") },
+        ok: { DEFAULT: v("ok"), soft: v("ok-soft") },
+        warn: { DEFAULT: v("warn"), soft: v("warn-soft") },
+        danger: { DEFAULT: v("danger"), soft: v("danger-soft") },
+        info: { DEFAULT: v("info"), soft: v("info-soft") },
+        violet: { DEFAULT: v("violet"), soft: v("violet-soft") },
+      },
+      borderRadius: {
+        card: "16px",
       },
       boxShadow: {
-        card: "0 4px 20px -2px rgba(16, 24, 40, 0.04), 0 2px 6px -1px rgba(16, 24, 40, 0.02)",
-        "card-hover": "0 12px 30px -4px rgba(16, 24, 40, 0.08), 0 4px 12px -2px rgba(16, 24, 40, 0.03)",
-        button: "0 2px 8px rgba(255, 114, 34, 0.25)",
-        pill: "0 2px 6px rgba(0, 0, 0, 0.04)",
+        card: "0 1px 2px rgb(16 24 40 / 0.04), 0 1px 3px rgb(16 24 40 / 0.06)",
+        "card-hover": "0 8px 24px -6px rgb(16 24 40 / 0.12)",
+        hero: "0 18px 40px -18px rgb(var(--brand) / 0.45)",
       },
       fontFamily: {
-        sans: [
-          "Inter",
-          "-apple-system",
-          "BlinkMacSystemFont",
-          "'Segoe UI'",
-          "Roboto",
-          "sans-serif",
-        ],
-        mono: [
-          "ui-monospace",
-          "SFMono-Regular",
-          "Menlo",
-          "Monaco",
-          "Consolas",
-          "monospace",
-        ],
+        sans: ["Inter", "-apple-system", "BlinkMacSystemFont", "'Segoe UI'", "Roboto", "sans-serif"],
+        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Monaco", "Consolas", "monospace"],
       },
     },
   },
