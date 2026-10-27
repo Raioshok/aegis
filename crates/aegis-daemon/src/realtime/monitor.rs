@@ -11,6 +11,8 @@ use aegis_core::now_epoch;
 use aegis_engine::shannon_entropy;
 use aegis_quarantine::Quarantine;
 use std::sync::atomic::Ordering;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{mpsc, Mutex};
@@ -45,24 +47,55 @@ impl Monitor {
         self
     }
 
-    /// Consume events until the channel closes. Each event is scanned on a
-    /// blocking thread pool so a slow scan never stalls the async runtime.
+    /// Consume events until the channel closes, then finish in-flight scans.
+    /// Scans run in parallel (one per CPU) so a slow file never stalls the rest;
+    /// repeat events for a file already being scanned collapse into one rescan.
     pub async fn run(self, mut rx: mpsc::Receiver<WatchEvent>) {
         tracing::info!("real-time monitor started");
+        let this = Arc::new(self);
+        let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let permits = Arc::new(tokio::sync::Semaphore::new(workers));
+        // path -> "changed again while being scanned"
+        let in_flight: Arc<std::sync::Mutex<HashMap<PathBuf, bool>>> = Default::default();
+        let mut tasks = tokio::task::JoinSet::new();
+
         while let Some(event) = rx.recv().await {
-            self.state.rt_events.fetch_add(1, Ordering::Relaxed);
-            self.handle(event).await;
+            this.state.rt_events.fetch_add(1, Ordering::Relaxed);
+            // Behavioural (ransomware) observation sees *every* event, in order,
+            // including writes to files the signature engines call clean.
+            if this.guard.is_some() {
+                this.observe_ransomware(&event).await;
+            }
+            {
+                let mut map = in_flight.lock().expect("in-flight lock");
+                if let Some(dirty) = map.get_mut(&event.path) {
+                    *dirty = true;
+                    continue;
+                }
+                map.insert(event.path.clone(), false);
+            }
+            let permit = permits.clone().acquire_owned().await.expect("semaphore open");
+            let (this, in_flight) = (this.clone(), in_flight.clone());
+            tasks.spawn(async move {
+                loop {
+                    this.scan_and_respond(&event).await;
+                    let mut map = in_flight.lock().expect("in-flight lock");
+                    if map.get(&event.path) == Some(&true) {
+                        map.insert(event.path.clone(), false);
+                    } else {
+                        map.remove(&event.path);
+                        break;
+                    }
+                }
+                drop(permit);
+            });
+            while tasks.try_join_next().is_some() {}
         }
+        while tasks.join_next().await.is_some() {}
         tracing::info!("real-time monitor stopped");
     }
 
-    async fn handle(&self, event: WatchEvent) {
-        // Behavioural (ransomware) observation first — it needs to see *every*
-        // event, including writes to files the signature engines call clean.
-        if self.guard.is_some() {
-            self.observe_ransomware(&event).await;
-        }
-
+    async fn scan_and_respond(&self, event: &WatchEvent) {
         let state = self.state.clone();
         let path = event.path.clone();
         // Run the (CPU/IO-bound) scan off the async reactor.
@@ -128,11 +161,9 @@ impl Monitor {
                     Ok(q) => {
                         match q.quarantine(
                             &verdict.path,
-                            &verdict.sha256,
                             &top.threat,
                             &top.engine,
                             verdict.severity() as i64,
-                            now_epoch(),
                         ) {
                             Ok(_) => {
                                 self.state.rt_blocked.fetch_add(1, Ordering::Relaxed);
@@ -242,7 +273,7 @@ fn file_head_entropy(path: &std::path::Path) -> f64 {
     let Ok(mut f) = std::fs::File::open(path) else {
         return 0.0;
     };
-    let mut buf = vec![0u8; 64 * 1024];
+    let mut buf = [0u8; 64 * 1024];
     match f.read(&mut buf) {
         Ok(n) if n > 0 => shannon_entropy(&buf[..n]),
         _ => 0.0,

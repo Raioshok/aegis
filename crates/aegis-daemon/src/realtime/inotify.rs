@@ -63,7 +63,9 @@ fn run(mut inotify: Inotify, roots: Vec<PathBuf>, tx: mpsc::Sender<WatchEvent>) 
     }
 
     let mut buffer = [0u8; 8192];
+    let mut since = std::time::SystemTime::now();
     loop {
+        let read_started = std::time::SystemTime::now();
         let events = match inotify.read_events_blocking(&mut buffer) {
             Ok(events) => events,
             Err(e) => {
@@ -78,6 +80,16 @@ fn run(mut inotify: Inotify, roots: Vec<PathBuf>, tx: mpsc::Sender<WatchEvent>) 
             .collect();
 
         for (wd, evmask, name) in pending {
+            if evmask.contains(EventMask::Q_OVERFLOW) {
+                // The kernel dropped events: catch up on everything changed since the last good read.
+                tracing::warn!("inotify queue overflow; rescanning watched roots");
+                for root in &roots {
+                    if !emit_files(root, since, &tx) {
+                        return;
+                    }
+                }
+                continue;
+            }
             let dir = match wd_paths.get(&wd) {
                 Some(d) => d.clone(),
                 None => continue,
@@ -91,10 +103,18 @@ fn run(mut inotify: Inotify, roots: Vec<PathBuf>, tx: mpsc::Sender<WatchEvent>) 
             if evmask.contains(EventMask::ISDIR) {
                 if evmask.contains(EventMask::CREATE) || evmask.contains(EventMask::MOVED_TO) {
                     add_watch_recursive(&mut inotify, &full, &mut wd_paths);
+                    // Files already inside a moved/unpacked folder never raise their own events.
+                    if !emit_files(&full, std::time::UNIX_EPOCH, &tx) {
+                        return;
+                    }
                 }
                 continue;
             }
 
+            // CREATE alone means an empty new file; its CLOSE_WRITE follows.
+            if evmask == EventMask::CREATE {
+                continue;
+            }
             let kind = if evmask.contains(EventMask::MOVED_TO) {
                 EventKind::MovedIn
             } else {
@@ -112,7 +132,29 @@ fn run(mut inotify: Inotify, roots: Vec<PathBuf>, tx: mpsc::Sender<WatchEvent>) 
                 return; // receiver dropped → daemon shutting down
             }
         }
+        since = read_started;
     }
+}
+
+/// Send a `Written` event for every file under `dir` modified at or after `since`.
+/// Returns false when the receiver is gone.
+fn emit_files(dir: &Path, since: std::time::SystemTime, tx: &mpsc::Sender<WatchEvent>) -> bool {
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else { continue };
+        for entry in entries.flatten() {
+            let Ok(meta) = entry.metadata() else { continue };
+            if meta.is_dir() {
+                stack.push(entry.path());
+            } else if meta.is_file() && meta.modified().map(|m| m >= since).unwrap_or(true) {
+                let ev = WatchEvent { path: entry.path(), kind: EventKind::Written, pid: None };
+                if tx.blocking_send(ev).is_err() {
+                    return false;
+                }
+            }
+        }
+    }
+    true
 }
 
 /// Add a watch on `dir` and every existing subdirectory beneath it.

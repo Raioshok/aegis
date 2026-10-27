@@ -281,7 +281,8 @@ mod tests {
     #[tokio::test]
     async fn ipc_ping_status_and_scan_over_real_socket() {
         let tmp = tempfile::tempdir().unwrap();
-        let _socket = tmp.path().join("aegisd.sock");
+        #[cfg(unix)]
+        let socket = tmp.path().join("aegisd.sock");
 
         // A malicious file the daemon should flag when asked to scan it.
         let victim = tmp.path().join("evil.sh");

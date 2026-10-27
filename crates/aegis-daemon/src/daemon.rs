@@ -46,7 +46,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- Real-time monitor task ---
     let monitor_task = if config.realtime.enabled {
-        match start_watcher(&config) {
+        match start_watcher(&config, &state) {
             Ok(mut watcher) => {
                 let backend = watcher.backend();
                 let watched = watcher.watched();
@@ -93,6 +93,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let shutdown = shutdown.clone();
         tokio::spawn(async move { scheduler::run(state, shutdown).await })
     };
+    let feeds_task = tokio::spawn(scheduler::run_feed_updates(state.clone(), shutdown.clone()));
 
     // Tell systemd we are ready (on Linux).
     #[cfg(target_os = "linux")]
@@ -111,6 +112,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
         let _ = server_task.await;
         let _ = scheduler_task.await;
+        let _ = feeds_task.await;
     })
     .await;
     if let Some(m) = monitor_task {
@@ -124,13 +126,46 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Scan-before-run verdict for fanotify, with a cache keyed on file identity
+/// and full modification time so unchanged binaries are not rescanned per launch.
+#[cfg(target_os = "linux")]
+fn exec_gate(config: &Config, state: &Arc<DaemonState>) -> Option<crate::realtime::fanotify::ExecGate> {
+    use std::os::unix::fs::MetadataExt;
+    if !config.realtime.block_exec {
+        return None;
+    }
+    let state = state.clone();
+    let cache: std::sync::Mutex<std::collections::HashMap<(u64, u64, i64, i64, u64), bool>> = Default::default();
+    Some(std::sync::Arc::new(move |path: &std::path::Path| {
+        let key = std::fs::metadata(path)
+            .ok()
+            .map(|m| (m.dev(), m.ino(), m.mtime(), m.mtime_nsec(), m.size()));
+        if let Some(k) = key {
+            if let Some(allow) = cache.lock().expect("exec cache").get(&k) {
+                return *allow;
+            }
+        }
+        let allow = !state.scanner().scan_file(path).is_threat();
+        if let Some(k) = key {
+            let mut c = cache.lock().expect("exec cache");
+            if c.len() > 50_000 {
+                c.clear(); // shortcut: crude eviction, fine for a per-host launch cache
+            }
+            c.insert(k, allow);
+        }
+        allow
+    }))
+}
+
 /// Select and start the configured real-time watcher.
-fn start_watcher(config: &Config) -> Result<Box<dyn Watcher>, String> {
+fn start_watcher(config: &Config, state: &Arc<DaemonState>) -> Result<Box<dyn Watcher>, String> {
+    #[cfg(not(target_os = "linux"))]
+    let _ = state;
     let paths = config.realtime.paths.clone();
     #[cfg(target_os = "linux")]
     {
         match config.realtime.backend.as_str() {
-            "fanotify" => match crate::realtime::fanotify::start(paths.clone()) {
+            "fanotify" => match crate::realtime::fanotify::start(paths.clone(), exec_gate(config, state)) {
                 Ok(w) => Ok(Box::new(w)),
                 Err(e) => {
                     tracing::warn!(error = %e, "fanotify unavailable; falling back to inotify");
