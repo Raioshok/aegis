@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 
-use aegis_core::{Config, Detection, Severity};
+use aegis_core::{Config, Detection};
 use aegis_storage::{Database, QuarantineRecord};
 use eframe::egui::{self, Align, Layout, RichText};
 use sha2::Digest;
@@ -24,6 +24,7 @@ pub enum BackgroundMsg {
     ScanProgress { scanned: usize, total: usize, current_path: String },
     ScanFinished { scanned: usize, threats: usize, duration_ms: u64 },
     MemoryAuditResult { alerts: Vec<String> },
+    #[allow(dead_code)]
     ActionStatus(String),
 }
 
@@ -50,12 +51,19 @@ pub struct AegisApp {
     // Behavior & DAG State
     pub is_auditing_memory: bool,
     pub memory_alerts: Vec<String>,
+
+    /// (name, status) of the engines a scan loads, read once at startup.
+    pub engine_status: Vec<(String, String)>,
 }
 
 impl AegisApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let (tx, rx) = channel();
         let config = Config::load();
+        let engine_status = aegis_engine::default_engines(&config, &aegis_core::paths::user_rules_dir())
+            .iter()
+            .map(|e| (e.name().to_string(), e.status()))
+            .collect();
         let db = Database::open(&aegis_core::paths::database_file()).ok();
 
         let mut app = Self {
@@ -75,6 +83,7 @@ impl AegisApp {
             status_message: None,
             is_auditing_memory: false,
             memory_alerts: Vec::new(),
+            engine_status,
         };
         app.refresh_quarantine();
         app
@@ -180,12 +189,15 @@ impl AegisApp {
         let tx = self.tx.clone();
 
         thread::spawn(move || {
-            let mut alerts = Vec::new();
-            alerts.push("[Memory Audit] Scanning running user-space processes for thread-pool & unbacked execution...".into());
-            alerts.push("[Module Stomping] Auditing loaded NTDLL/KERNEL32 .text sections against disk images...".into());
-            alerts.push("[FunctionPeekaboo] Inspecting TEB.UserReserved for sleep-masking evasion magic...".into());
-            alerts.push("[Shield Active] All running threads verified backed by valid disk modules (0 stomped).".into());
-            
+            let detections = aegis_behavior::memory::scan_all();
+            let mut alerts: Vec<String> = detections
+                .iter()
+                .map(|d| format!("[{}] {} — {}", d.severity.label(), d.threat, d.detail))
+                .collect();
+            if alerts.is_empty() {
+                alerts.push("Memory scan finished: no injected or unbacked code found.".into());
+            }
+
             let _ = tx.send(BackgroundMsg::MemoryAuditResult { alerts });
         });
     }
@@ -204,9 +216,7 @@ impl AegisApp {
                         path,
                         &detection.threat,
                         &detection.engine,
-                        &detection.detail,
                         detection.severity as i64,
-                        0,
                     ) {
                         Ok(rec) => {
                             self.set_status(&format!("Quarantined: {} ({})", path.file_name().unwrap_or_default().to_string_lossy(), rec.threat));
@@ -263,7 +273,7 @@ impl eframe::App for AegisApp {
 
         // Top Header
         egui::TopBottomPanel::top("top_panel")
-            .frame(egui::Frame::none().fill(SIDEBAR_COLOR).stroke(egui::Stroke::new(1.0, BORDER_COLOR)))
+            .frame(egui::Frame::none().fill(SIDEBAR_COLOR).stroke(egui::Stroke::new(1.0_f32, BORDER_COLOR)))
             .show(ctx, |ui| {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
@@ -288,7 +298,7 @@ impl eframe::App for AegisApp {
         // Left Navigation Rail
         egui::SidePanel::left("nav_rail")
             .exact_width(220.0)
-            .frame(egui::Frame::none().fill(SIDEBAR_COLOR).stroke(egui::Stroke::new(1.0, BORDER_COLOR)))
+            .frame(egui::Frame::none().fill(SIDEBAR_COLOR).stroke(egui::Stroke::new(1.0_f32, BORDER_COLOR)))
             .show(ctx, |ui| {
                 ui.add_space(16.0);
 
@@ -299,7 +309,7 @@ impl eframe::App for AegisApp {
 
                     let frame = egui::Frame::none()
                         .fill(bg)
-                        .stroke(if is_active { egui::Stroke::new(1.0, BORDER_COLOR) } else { egui::Stroke::NONE })
+                        .stroke(if is_active { egui::Stroke::new(1.0_f32, BORDER_COLOR) } else { egui::Stroke::NONE })
                         .rounding(egui::Rounding::same(6.0))
                         .inner_margin(egui::Margin::symmetric(14.0, 10.0));
 

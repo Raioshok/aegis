@@ -322,8 +322,18 @@ pub fn scan_pid(pid: u32) -> Vec<Detection> {
                 }
             }
 
-            // Check for process hollowing
+            // Check for process hollowing, ghosting, and PEB spoofing
             if let Some(exe_path) = img_path {
+                if !exe_path.exists() {
+                    out.push(Detection::new(
+                        "Memory",
+                        format!("Injected.ProcessGhosting:{pid}"),
+                        Severity::Critical,
+                        ThreatClass::Rootkit,
+                        format!("PID {pid} primary image file at {} was deleted while process actively running (Process Ghosting / Herpaderping)", exe_path.display()),
+                    ));
+                }
+
                 if let Ok(disk_bytes) = std::fs::read(&exe_path) {
                     if disk_bytes.starts_with(b"MZ") && disk_bytes.len() >= 0x40 {
                         // Find matching base header region in memory
@@ -356,13 +366,37 @@ pub fn scan_pid(pid: u32) -> Vec<Detection> {
             if let Ok(anomalies) = inspector.inspect_threads(pid) {
                 for a in anomalies {
                     if !is_jit {
-                        if a.is_function_peekaboo {
+                        if a.is_hardware_breakpoint {
+                            out.push(Detection::new(
+                                "Memory",
+                                format!("Evasion.HardwareBreakpoint.VEH:{pid}:{}", a.tid),
+                                Severity::Critical,
+                                ThreatClass::Rootkit,
+                                format!("PID {pid} thread {} has active hardware debug registers DR0..DR3 (0x{:x}, 0x{:x}) outside debugger (VEH hook bypass / LayeredSyscall)", a.tid, a.debug_registers[0], a.debug_registers[1]),
+                            ));
+                        } else if a.is_function_peekaboo {
                             out.push(Detection::new(
                                 "Memory",
                                 format!("Evasion.FunctionPeekaboo:{pid}:{}", a.tid),
                                 Severity::Critical,
                                 ThreatClass::Rootkit,
                                 format!("PID {pid} thread {} exhibits FunctionPeekaboo LLVM on-demand function masking in TEB.UserReserved", a.tid),
+                            ));
+                        } else if a.is_sleeping_beacon {
+                            out.push(Detection::new(
+                                "Memory",
+                                format!("Evasion.SleepObfuscation:{pid}:{}", a.tid),
+                                Severity::Critical,
+                                ThreatClass::Rootkit,
+                                format!("PID {pid} thread {} execution frame resides in non-executable private memory (Ekko/Foliage sleep obfuscation / permission mask)", a.tid),
+                            ));
+                        } else if a.is_indirect_syscall {
+                            out.push(Detection::new(
+                                "Memory",
+                                format!("Evasion.IndirectSyscall:{pid}:{}", a.tid),
+                                Severity::Critical,
+                                ThreatClass::Rootkit,
+                                format!("PID {pid} thread {} return address on stack [RSP] originates from unbacked memory (Indirect Syscall / Halo's Gate)", a.tid),
                             ));
                         } else if a.is_rip_unbacked {
                             out.push(Detection::new(
@@ -399,6 +433,32 @@ pub fn scan_pid(pid: u32) -> Vec<Detection> {
                     ));
                 }
             }
+
+            // AMSI / ETW patching: compare the entry of the scanning and tracing APIs
+            // in the target with known "return early" patches. Unloaded DLL = unreadable = skipped.
+            for (dll, func) in [("amsi.dll", "AmsiScanBuffer"), ("ntdll.dll", "EtwEventWrite")] {
+                let Some(addr) = aegis_platform::windows::security_api_address(dll, func) else { continue };
+                let entry = aegis_core::MapRegion {
+                    start: addr,
+                    end: addr + 16,
+                    permissions: String::new(),
+                    is_private: false,
+                    is_executable: true,
+                    is_writable: false,
+                    pathname: None,
+                };
+                if let Ok(bytes) = inspector.read(pid, &entry) {
+                    if is_known_bypass_patch(&bytes) {
+                        out.push(Detection::new(
+                            "Memory",
+                            format!("Evasion.PatchedSecurityApi:{pid}:{func}"),
+                            Severity::Critical,
+                            ThreatClass::Behavioral,
+                            format!("PID {pid} has {dll}!{func} patched to return early (AMSI/ETW blinding)"),
+                        ));
+                    }
+                }
+            }
         }
         out
     }
@@ -412,28 +472,54 @@ pub fn scan_pid(pid: u32) -> Vec<Detection> {
 /// Scan every process the caller can read.
 pub fn scan_all() -> Vec<Detection> {
     let mut out = Vec::new();
-    if let Ok(entries) = std::fs::read_dir("/proc") {
-        for e in entries.flatten() {
-            if let Some(pid) = e.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) {
-                out.extend(scan_pid(pid));
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(entries) = std::fs::read_dir("/proc") {
+            for e in entries.flatten() {
+                if let Some(pid) = e.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) {
+                    out.extend(scan_pid(pid));
+                }
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        let proc_ctrl = aegis_platform::default_process_control();
+        if let Ok(pids) = proc_ctrl.enumerate_pids() {
+            for pid in pids {
+                if pid > 4 {
+                    out.extend(scan_pid(pid));
+                }
             }
         }
     }
     out
 }
 
-/// Checks if a memory page contains raw x86_64 direct syscall stubs (Hell's Gate / SysWhispers).
+/// Checks if a memory page contains raw x86_64 direct or indirect syscall stubs (Hell's/Tartarus' Gate, SysWhispers, FreshyCalls).
 fn find_direct_syscall_stub(bytes: &[u8]) -> bool {
     if bytes.len() < 12 {
         return false;
     }
     for w in bytes.windows(12) {
-        // Pattern 1: 4c 8b d1 b8 ?? ?? 00 00 0f 05 c3 (mov r10, rcx; mov eax, <ssn>; syscall; ret)
+        // Pattern 1: 4c 8b d1 b8 ?? ?? 00 00 0f 05 (mov r10, rcx; mov eax, <ssn>; syscall)
         if w[0] == 0x4c && w[1] == 0x8b && w[2] == 0xd1 && w[3] == 0xb8 && w[8] == 0x0f && w[9] == 0x05 {
             return true;
         }
-        // Pattern 2: 49 89 ca b8 ?? ?? 00 00 0f 05 c3 (mov r10, rcx; mov eax, <ssn>; syscall; ret)
+        // Pattern 2: 49 89 ca b8 ?? ?? 00 00 0f 05 (mov r10, rcx; mov eax, <ssn>; syscall)
         if w[0] == 0x49 && w[1] == 0x89 && w[2] == 0xca && w[3] == 0xb8 && w[8] == 0x0f && w[9] == 0x05 {
+            return true;
+        }
+        // Pattern 3: b8 ?? ?? 00 00 4c 8b d1 0f 05 (mov eax, <ssn>; mov r10, rcx; syscall)
+        if w[0] == 0xb8 && w[3] == 0x00 && w[4] == 0x00 && w[5] == 0x4c && w[6] == 0x8b && w[7] == 0xd1 && w[8] == 0x0f && w[9] == 0x05 {
+            return true;
+        }
+        // Pattern 4: Tartarus' Gate / Halos Gate with instruction padding
+        if w[0] == 0x4c && w[1] == 0x8b && w[2] == 0xd1 && w[3] == 0xb8 && w[6] == 0x00 && w[7] == 0x00 && ((w[8] == 0x0f && w[9] == 0x05) || (w[10] == 0x0f && w[11] == 0x05)) {
+            return true;
+        }
+        // Pattern 5: Indirect syscall stub jumping to gadget (4c 8b d1 b8 ?? ?? 00 00 ff 25 / ff e0)
+        if w[0] == 0x4c && w[1] == 0x8b && w[2] == 0xd1 && w[3] == 0xb8 && (w[8] == 0xff && (w[9] == 0xe0 || w[9] == 0xe2 || w[9] == 0x25)) {
             return true;
         }
     }
@@ -451,6 +537,14 @@ mod tests {
         assert!(find_direct_syscall_stub(&stub));
         let innocent = [0x90; 12];
         assert!(!find_direct_syscall_stub(&innocent));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn own_process_security_apis_are_not_patched() {
+        assert!(aegis_platform::windows::security_api_address("ntdll.dll", "EtwEventWrite").is_some());
+        let dets = scan_pid(std::process::id());
+        assert!(!dets.iter().any(|d| d.threat.starts_with("Evasion.PatchedSecurityApi")), "{dets:?}");
     }
 
     #[test]

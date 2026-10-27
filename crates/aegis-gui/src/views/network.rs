@@ -1,4 +1,4 @@
-use eframe::egui::{self, RichText, Vec2};
+use eframe::egui::{self, RichText};
 use crate::app::AegisApp;
 use crate::theme::*;
 
@@ -8,7 +8,7 @@ impl AegisApp {
             // Header
             egui::Frame::none()
                 .fill(CARD_BG)
-                .stroke(egui::Stroke::new(1.0, BORDER_COLOR))
+                .stroke(egui::Stroke::new(1.0_f32, BORDER_COLOR))
                 .rounding(egui::Rounding::same(8.0))
                 .inner_margin(egui::Margin::symmetric(20.0, 16.0))
                 .show(ui, |ui| {
@@ -23,7 +23,7 @@ impl AegisApp {
             // Gateway Status Card
             egui::Frame::none()
                 .fill(CARD_BG)
-                .stroke(egui::Stroke::new(1.0, BORDER_COLOR))
+                .stroke(egui::Stroke::new(1.0_f32, BORDER_COLOR))
                 .rounding(egui::Rounding::same(6.0))
                 .inner_margin(egui::Margin::symmetric(20.0, 16.0))
                 .show(ui, |ui| {
@@ -41,19 +41,17 @@ impl AegisApp {
             ui.add_space(16.0);
 
             // Firewall Shields
-            ui.label(RichText::new("NETWORK SHIELDS").size(13.0).strong().color(TEXT_PRIMARY));
+            ui.label(RichText::new("NETWORK CHECKS").size(13.0).strong().color(TEXT_PRIMARY));
             ui.add_space(8.0);
 
             let net_shields = [
-                ("Malicious C2 Domain / IP Interceptor", "Blocks known malware command-and-control beacons and reverse shell endpoints", "ENFORCED"),
-                ("Anti-Exfiltration Packet Filter", "Monitors outbound volume bursts and high-entropy DNS tunneling channels", "ENFORCED"),
-                ("Ransomware Share Locker", "Prevents unauthorized SMB network share traversal and remote file locking", "ENFORCED"),
+                ("C2 / Botnet IP Matching", "Matches open connections against your IP blocklist and the synced Feodo Tracker feed", "ON SCAN"),
             ];
 
             for (title, desc, status) in net_shields {
                 egui::Frame::none()
                     .fill(CARD_BG)
-                    .stroke(egui::Stroke::new(1.0, BORDER_COLOR))
+                    .stroke(egui::Stroke::new(1.0_f32, BORDER_COLOR))
                     .rounding(egui::Rounding::same(6.0))
                     .inner_margin(egui::Margin::symmetric(16.0, 12.0))
                     .show(ui, |ui| {

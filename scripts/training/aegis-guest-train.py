@@ -71,7 +71,7 @@ def post_json(gateway_host, endpoint, payload):
     """Sends JSON to the Gateway."""
     url = f"http://{gateway_host}:{GATEWAY_PORT}{endpoint}"
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json", "User-Agent": "Aegis-Guest-Runner"})
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json", "User-Agent": "Aegis-Guest-Runner", "X-Aegis-Token": os.environ.get("AEGIS_GATEWAY_TOKEN", "")})
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
             return json.loads(resp.read().decode())
@@ -119,8 +119,8 @@ def run_training_cycle():
         sys.exit(1)
     
     print(f"  [+] Connected to Host Gateway at http://{gw_host}:{GATEWAY_PORT}")
-    print(f"      Active YARA Rules: {gw_info.get('yara_rules_active', 0)}")
-    print(f"      Threat Hashes:     {gw_info.get('threat_hashes_indexed', 0)}")
+    for eng in gw_info.get("engines", []):
+        print(f"      {eng.get('name')}: {eng.get('status')}")
 
     # 2. Locate Samples Directory
     script_dir = os.path.dirname(os.path.abspath(__file__))

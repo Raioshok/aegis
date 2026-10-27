@@ -209,14 +209,7 @@ pub fn quarantine_add(app: &App, path: &Path) -> aegis_core::Result<i32> {
     }
     let top = v.top_detection().unwrap();
     let q = Quarantine::open(&app.db)?;
-    q.quarantine(
-        path,
-        &v.sha256,
-        &top.threat,
-        &top.engine,
-        v.severity() as i64,
-        now_epoch(),
-    )?;
+    q.quarantine(path, &top.threat, &top.engine, v.severity() as i64)?;
     println!("Quarantined {} ({})", path.display(), top.threat);
     Ok(0)
 }

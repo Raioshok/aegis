@@ -30,8 +30,8 @@ impl Default for EngineToggles {
 #[serde(default)]
 pub struct Config {
     pub engines: EngineToggles,
-    /// Shields & modular feature toggles.
-    pub shields: ShieldsConfig,
+    /// Download the threat databases (abuse.ch, LOLDrivers) once a day from the daemon.
+    pub auto_update_feeds: bool,
     /// Kaspersky-style Game Mode (resource throttling & quiet mode).
     pub game_mode: GameModeConfig,
     /// Skip files larger than this (bytes). Protects against huge-file DoS.
@@ -52,28 +52,6 @@ pub struct Config {
     pub schedule: ScheduleConfig,
     /// Ransomware behavioural-guard settings (daemon).
     pub ransomware: RansomwareSettings,
-}
-
-/// Shields & protection component toggles.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ShieldsConfig {
-    pub realtime_filesystem: bool,
-    pub memory_defense: bool,
-    pub network_firewall: bool,
-    pub ransomware_guard: bool,
-    pub cloud_threat_feeds: bool,
-}
-
-impl Default for ShieldsConfig {
-    fn default() -> Self {
-        Self {
-            realtime_filesystem: true,
-            memory_defense: true,
-            network_firewall: true,
-            ransomware_guard: true,
-            cloud_threat_feeds: true,
-        }
-    }
 }
 
 /// Kaspersky-style Gaming Mode (resource throttling & quiet mode during full-screen games).
@@ -144,6 +122,14 @@ pub struct RealtimeConfig {
     pub backend: String,
     /// Automatically quarantine files detected in real time (no prompt).
     pub auto_quarantine: bool,
+    /// With the fanotify backend, hold every program launch until it is scanned
+    /// and deny the ones detected as threats (true prevention).
+    #[serde(default = "default_true")]
+    pub block_exec: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for RealtimeConfig {
@@ -156,6 +142,7 @@ impl Default for RealtimeConfig {
             paths: vec![downloads],
             backend: "inotify".to_string(),
             auto_quarantine: false,
+            block_exec: true,
         }
     }
 }
@@ -188,7 +175,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             engines: EngineToggles::default(),
-            shields: ShieldsConfig::default(),
+            auto_update_feeds: true,
             game_mode: GameModeConfig::default(),
             max_file_size: 200 * 1024 * 1024,
             entropy_threshold: 7.2,

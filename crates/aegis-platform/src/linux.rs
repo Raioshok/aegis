@@ -78,6 +78,48 @@ impl ProcessControl for LinuxProcessControl {
     fn image_path(&self, pid: u32) -> Option<PathBuf> {
         std::fs::read_link(format!("/proc/{pid}/exe")).ok()
     }
+
+    fn command_line(&self, pid: u32) -> Option<Vec<String>> {
+        let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+        let args: Vec<String> = raw
+            .split(|&b| b == 0)
+            .filter(|a| !a.is_empty())
+            .map(|a| String::from_utf8_lossy(a).into_owned())
+            .collect();
+        (!args.is_empty()).then_some(args)
+    }
+
+    fn enumerate_processes_snapshot(&self) -> Result<Vec<(u32, u32, String)>> {
+        Ok(self
+            .enumerate_pids()?
+            .into_iter()
+            .filter_map(|pid| {
+                let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+                parse_proc_stat(&stat).map(|(ppid, comm)| (pid, ppid, comm))
+            })
+            .collect())
+    }
+}
+
+/// Parse `(parent pid, name)` from `/proc/<pid>/stat`: `pid (comm) state ppid ...`.
+/// `comm` may itself contain spaces and parentheses, so split at the last ')'.
+fn parse_proc_stat(stat: &str) -> Option<(u32, String)> {
+    let open = stat.find('(')?;
+    let close = stat.rfind(')')?;
+    let comm = stat.get(open + 1..close)?.to_string();
+    let ppid = stat.get(close + 1..)?.split_whitespace().nth(1)?.parse().ok()?;
+    Some((ppid, comm))
+}
+
+#[cfg(test)]
+mod proc_stat_tests {
+    #[test]
+    fn parses_comm_with_spaces_and_parens() {
+        assert_eq!(
+            super::parse_proc_stat("4242 (my (odd) proc) S 17 4242 4242 0 -1"),
+            Some((17, "my (odd) proc".to_string()))
+        );
+    }
 }
 
 // --- Linux Memory Inspector -------------------------------------------
@@ -233,7 +275,8 @@ impl LinuxSecretStore {
 
 impl SecretStore for LinuxSecretStore {
     fn load_or_create_vault_key(&self) -> Result<Zeroizing<[u8; 32]>> {
-        let path = LinuxPaths::new().data_dir().join("quarantine.key");
+        // Same location the vault and `ensure_dirs` use, so per-user installs work too.
+        let path = aegis_core::paths::keyring_file();
         if path.exists() {
             let bytes = std::fs::read(&path).map_err(|e| AegisError::io(&path, e))?;
             if bytes.len() == 32 {

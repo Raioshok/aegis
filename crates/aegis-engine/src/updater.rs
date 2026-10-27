@@ -13,6 +13,44 @@ use std::path::PathBuf;
 pub const MALWAREBAZAAR_RECENT_URL: &str = "https://bazaar.abuse.ch/export/txt/sha256/recent/";
 pub const FEODOTRACKER_IP_URL: &str = "https://feodotracker.abuse.ch/downloads/ipblocklist.txt";
 pub const THREATFOX_RECENT_URL: &str = "https://threatfox.abuse.ch/export/csv/ip-port/recent/";
+pub const LOLDRIVERS_URL: &str = "https://www.loldrivers.io/api/drivers.json";
+
+/// Result of one online sync. A feed that failed keeps its previous local copy.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct SyncReport {
+    pub malware_hashes: usize,
+    pub c2_ips: usize,
+    pub vulnerable_drivers: usize,
+    /// One message per feed that could not be updated.
+    pub errors: Vec<String>,
+}
+
+/// Download `url` with the system `curl` (shipped with Windows 10+ and every Linux distro).
+fn download(url: &str) -> std::result::Result<Vec<u8>, String> {
+    let out = std::process::Command::new("curl")
+        .args(["-fsSL", "--max-time", "120", "--proto", "=https", url])
+        .output()
+        .map_err(|e| format!("cannot run curl: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("{url}: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Ok(out.stdout)
+}
+
+/// `sha256 filename` lines for every known vulnerable driver sample in LOLDrivers JSON.
+pub fn parse_loldrivers(json: &[u8]) -> std::result::Result<String, String> {
+    let v: serde_json::Value = serde_json::from_slice(json).map_err(|e| format!("loldrivers json: {e}"))?;
+    let mut out = String::new();
+    for driver in v.as_array().ok_or("loldrivers json is not a list")? {
+        for sample in driver["KnownVulnerableSamples"].as_array().into_iter().flatten() {
+            let Some(h) = sample["SHA256"].as_str().filter(|h| h.len() == 64) else { continue };
+            let name = sample["Filename"].as_str().filter(|n| !n.is_empty() && !n.contains(char::is_whitespace)).unwrap_or("driver.sys");
+            out.push_str(&format!("{} {name}
+", h.to_ascii_lowercase()));
+        }
+    }
+    Ok(out)
+}
 
 /// Manifest of cached feeds with their ETag / last-modified values.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -134,6 +172,51 @@ impl FeedManager {
         Ok(())
     }
 
+    /// Download MalwareBazaar recent hashes, Feodo Tracker C2 IPs and the
+    /// LOLDrivers database. Each feed is replaced only if it downloaded and parsed.
+    pub fn sync_online(&self) -> SyncReport {
+        let mut report = SyncReport::default();
+        match download(MALWAREBAZAAR_RECENT_URL) {
+            Ok(body) => {
+                let n = Self::parse_hashes(&String::from_utf8_lossy(&body)).len();
+                if n == 0 {
+                    report.errors.push("MalwareBazaar returned no hashes".into());
+                } else if let Err(e) = self.store_feed("malwarebazaar_recent.sha256", &body, None) {
+                    report.errors.push(e.to_string());
+                }
+            }
+            Err(e) => report.errors.push(e),
+        }
+        match download(FEODOTRACKER_IP_URL) {
+            Ok(body) => {
+                let (v4, v6) = Self::parse_ips(&String::from_utf8_lossy(&body));
+                if v4.is_empty() && v6.is_empty() {
+                    report.errors.push("Feodo Tracker returned no addresses".into());
+                } else if let Err(e) = self.store_feed("feodotracker.ips", &body, None) {
+                    report.errors.push(e.to_string());
+                }
+            }
+            Err(e) => report.errors.push(e),
+        }
+        match download(LOLDRIVERS_URL).and_then(|b| parse_loldrivers(&b)) {
+            Ok(lines) if !lines.is_empty() => {
+                if let Err(e) = self.store_feed("loldrivers.txt", lines.as_bytes(), None) {
+                    report.errors.push(e.to_string());
+                }
+            }
+            Ok(_) => report.errors.push("LOLDrivers returned no samples".into()),
+            Err(e) => report.errors.push(e),
+        }
+
+        let data = self.load_all();
+        report.malware_hashes = data.hashes.len();
+        report.c2_ips = data.block_sets.ipv4.len() + data.block_sets.ipv6.len();
+        report.vulnerable_drivers = std::fs::read_to_string(self.dir.join("loldrivers.txt"))
+            .map(|t| t.lines().count())
+            .unwrap_or(0);
+        report
+    }
+
     /// Load all stored local feeds from disk into unified structures.
     pub fn load_all(&self) -> FeedData {
         let mut data = FeedData::default();
@@ -186,6 +269,15 @@ deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
 ";
         let hashes = FeedManager::parse_hashes(sample);
         assert_eq!(hashes.len(), 2);
+    }
+
+    #[test]
+    fn parses_loldrivers_samples() {
+        let json = br#"[{"KnownVulnerableSamples":[{"SHA256":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","Filename":"rtcore64.sys"},{"SHA256":"short"}]},{"KnownVulnerableSamples":null}]"#;
+        let out = parse_loldrivers(json).unwrap();
+        assert_eq!(out, format!("{} rtcore64.sys
+", "a".repeat(64)));
+        assert!(parse_loldrivers(b"{}").is_err());
     }
 
     #[test]

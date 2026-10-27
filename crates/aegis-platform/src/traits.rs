@@ -31,6 +31,8 @@ pub trait ProcessControl: Send + Sync {
     fn resume(&self, pid: u32) -> Result<()>;
     fn kill(&self, pid: u32) -> Result<()>;
     fn image_path(&self, pid: u32) -> Option<PathBuf>;
+    /// Full command line (argv), when the OS lets us read it.
+    fn command_line(&self, pid: u32) -> Option<Vec<String>>;
     fn enumerate_pids(&self) -> Result<Vec<u32>>;
     /// Returns (pid, parent_pid, process_name)
     fn enumerate_processes_snapshot(&self) -> Result<Vec<(u32, u32, String)>> {
@@ -49,6 +51,10 @@ pub struct ThreadAnomaly {
     pub is_start_unbacked: bool,
     pub teb_user_reserved: Option<[usize; 4]>,
     pub is_function_peekaboo: bool,
+    pub is_hardware_breakpoint: bool,
+    pub is_sleeping_beacon: bool,
+    pub is_indirect_syscall: bool,
+    pub debug_registers: [u64; 4],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

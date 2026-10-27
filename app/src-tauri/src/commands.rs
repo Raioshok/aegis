@@ -12,6 +12,7 @@ use aegis_ipc::{Client, Response};
 use aegis_quarantine::Quarantine;
 use aegis_storage::Database;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -48,6 +49,17 @@ pub struct AppState {
     pub engines: Mutex<Arc<Vec<Box<dyn Engine>>>>,
     pub scan_progress: Arc<Mutex<ScanProgress>>,
     pub process_dag: Arc<ProcessTreeDag>,
+    /// image path -> trusted-binary verdict (signature checks are slow).
+    pub signed_cache: Arc<Mutex<HashMap<PathBuf, bool>>>,
+}
+
+fn is_signed_cached(cache: &Mutex<HashMap<PathBuf, bool>>, exe: &std::path::Path) -> bool {
+    if let Some(v) = cache.lock().unwrap().get(exe) {
+        return *v;
+    }
+    let v = aegis_platform::is_trusted_binary(exe);
+    cache.lock().unwrap().insert(exe.to_path_buf(), v);
+    v
 }
 
 impl AppState {
@@ -56,11 +68,25 @@ impl AppState {
         let db = Arc::new(Database::open(&paths::database_file()).map_err(|e| e.to_string())?);
         let cfg = Config::load();
         let engines = shared_engines(&cfg, &paths::user_rules_dir());
+        let process_dag = Arc::new(ProcessTreeDag::new());
+        let signed_cache: Arc<Mutex<HashMap<PathBuf, bool>>> = Default::default();
+        // Feed the lineage graph continuously, not only when the Processes page is open.
+        {
+            let (dag, cache) = (process_dag.clone(), signed_cache.clone());
+            let events = aegis_platform::start_process_poller(std::time::Duration::from_millis(750));
+            std::thread::spawn(move || {
+                for ev in events {
+                    let signed = is_signed_cached(&cache, &ev.exe);
+                    dag.add_process(&ev, signed, None);
+                }
+            });
+        }
         Ok(Self {
             db,
             engines: Mutex::new(engines),
             scan_progress: Arc::new(Mutex::new(ScanProgress::default())),
-            process_dag: Arc::new(ProcessTreeDag::new()),
+            process_dag,
+            signed_cache,
         })
     }
 }
@@ -92,6 +118,10 @@ pub struct Dashboard {
     pub quarantine_count: usize,
     pub engines: Vec<EngineInfo>,
     pub realtime: Option<RealtimeInfo>,
+    /// Unix time of the last threat-feed download (None = never synced).
+    pub last_feed_sync: Option<i64>,
+    /// Known vulnerable-driver hashes (0 where kernel drivers do not apply).
+    pub vulnerable_driver_signatures: usize,
 }
 
 #[derive(Serialize)]
@@ -225,6 +255,11 @@ pub async fn dashboard(state: tauri::State<'_, AppState>) -> Result<Dashboard, S
         quarantine_count,
         engines,
         realtime,
+        last_feed_sync: last_feed_sync(),
+        #[cfg(windows)]
+        vulnerable_driver_signatures: aegis_platform::windows::vulnerable_driver_count(),
+        #[cfg(not(windows))]
+        vulnerable_driver_signatures: 0,
     })
 }
 
@@ -261,33 +296,41 @@ pub async fn run_scan(
         }
 
         bus.subscribe(Arc::new(move |ev| {
-            if let Ok(mut p) = p_for_bus.lock() {
-                match ev {
-                    aegis_core::Event::ScanStarted { total, .. } => {
+            match ev {
+                aegis_core::Event::FileScanned { path, index, total } => {
+                    if *index % 16 == 0 || *index == *total {
+                        if let Ok(mut p) = p_for_bus.lock() {
+                            p.is_active = true;
+                            p.current_file = path.to_string_lossy().into_owned();
+                            p.scanned = *index;
+                            p.total = *total;
+                            p.percent = if *total > 0 { (*index as f32 / *total as f32) * 100.0 } else { 0.0 };
+                            let elapsed = start_time.elapsed().as_secs();
+                            p.elapsed_secs = elapsed;
+                            p.rate = if elapsed > 0 { *index / elapsed } else { *index };
+                        }
+                    }
+                }
+                aegis_core::Event::ScanStarted { total, .. } => {
+                    if let Ok(mut p) = p_for_bus.lock() {
                         p.is_active = true;
                         p.total = *total;
                         p.scanned = 0;
                         p.threats = 0;
                         p.current_file = "Starting parallel inspection...".into();
                     }
-                    aegis_core::Event::FileScanned { path, index, total } => {
-                        p.is_active = true;
-                        p.current_file = path.to_string_lossy().into_owned();
-                        p.scanned = *index;
-                        p.total = *total;
-                        p.percent = if *total > 0 { (*index as f32 / *total as f32) * 100.0 } else { 0.0 };
-                        let elapsed = start_time.elapsed().as_secs();
-                        p.elapsed_secs = elapsed;
-                        p.rate = if elapsed > 0 { *index / elapsed } else { *index };
-                    }
-                    aegis_core::Event::ThreatFound(_) => {
+                }
+                aegis_core::Event::ThreatFound(_) => {
+                    if let Ok(mut p) = p_for_bus.lock() {
                         p.threats += 1;
                     }
-                    aegis_core::Event::ScanFinished(_) => {
+                }
+                aegis_core::Event::ScanFinished(_) => {
+                    if let Ok(mut p) = p_for_bus.lock() {
                         p.is_active = false;
                     }
-                    _ => {}
                 }
+                _ => {}
             }
         }));
 
@@ -449,7 +492,7 @@ pub async fn quarantine_file(
     tokio::task::spawn_blocking(move || {
         let p = std::path::Path::new(&path_clone);
         let q = Quarantine::open(&db).map_err(|e| e.to_string())?;
-        let rec = q.quarantine(p, "Manual.Quarantine", "UserAction", "User initiated quarantine", 3, 0)
+        let rec = q.quarantine(p, "Manual.Quarantine", "UserAction", 3)
             .map_err(|e| e.to_string())?;
         Ok(rec.sha256)
     })
@@ -523,9 +566,7 @@ pub struct NetworkReport {
 #[tauri::command]
 pub async fn network_scan() -> Result<NetworkReport, String> {
     let report = tokio::task::spawn_blocking(|| {
-        let blocklist = aegis_network::IpBlocklist::from_file(
-            &aegis_core::paths::config_dir().join("ip-blocklist.txt"),
-        );
+        let blocklist = aegis_network::IpBlocklist::load_default();
         let conns = aegis_firewall::connections::all();
         let findings = detection_rows(
             conns
@@ -655,17 +696,18 @@ pub fn toggle_autostart(enable: bool) -> Result<bool, String> {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ProtectionConfigDto {
-    pub realtime_filesystem: bool,
-    pub memory_defense: bool,
-    pub network_firewall: bool,
+    /// Real-time file protection in aegisd (takes effect when aegisd restarts).
+    pub realtime_enabled: bool,
+    pub auto_quarantine: bool,
+    /// Linux fanotify only: deny launching detected programs.
+    pub block_exec: bool,
     pub ransomware_guard: bool,
-    pub cloud_threat_feeds: bool,
+    pub ransomware_auto_kill: bool,
+    pub auto_update_feeds: bool,
+    pub ml_engine: bool,
     pub game_mode_enabled: bool,
     pub game_mode_auto_detect: bool,
     pub entropy_threshold: f64,
-    pub ml_engine: bool,
-    pub byovd_defense: bool,
-    pub sleep_obfuscation_defense: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -681,28 +723,28 @@ pub struct GameModeStatusDto {
 pub fn get_protection_config() -> ProtectionConfigDto {
     let cfg = aegis_core::Config::load();
     ProtectionConfigDto {
-        realtime_filesystem: cfg.shields.realtime_filesystem,
-        memory_defense: cfg.shields.memory_defense,
-        network_firewall: cfg.shields.network_firewall,
-        ransomware_guard: cfg.shields.ransomware_guard,
-        cloud_threat_feeds: cfg.shields.cloud_threat_feeds,
+        realtime_enabled: cfg.realtime.enabled,
+        auto_quarantine: cfg.realtime.auto_quarantine,
+        block_exec: cfg.realtime.block_exec,
+        ransomware_guard: cfg.ransomware.enabled,
+        ransomware_auto_kill: cfg.ransomware.auto_kill,
+        auto_update_feeds: cfg.auto_update_feeds,
+        ml_engine: cfg.engines.ml,
         game_mode_enabled: cfg.game_mode.enabled,
         game_mode_auto_detect: cfg.game_mode.auto_detect,
         entropy_threshold: cfg.entropy_threshold,
-        ml_engine: cfg.engines.ml,
-        byovd_defense: true,
-        sleep_obfuscation_defense: true,
     }
 }
 
 #[tauri::command]
 pub fn set_protection_config(dto: ProtectionConfigDto) -> Result<(), String> {
     let mut cfg = aegis_core::Config::load();
-    cfg.shields.realtime_filesystem = dto.realtime_filesystem;
-    cfg.shields.memory_defense = dto.memory_defense;
-    cfg.shields.network_firewall = dto.network_firewall;
-    cfg.shields.ransomware_guard = dto.ransomware_guard;
-    cfg.shields.cloud_threat_feeds = dto.cloud_threat_feeds;
+    cfg.realtime.enabled = dto.realtime_enabled;
+    cfg.realtime.auto_quarantine = dto.auto_quarantine;
+    cfg.realtime.block_exec = dto.block_exec;
+    cfg.ransomware.enabled = dto.ransomware_guard;
+    cfg.ransomware.auto_kill = dto.ransomware_auto_kill;
+    cfg.auto_update_feeds = dto.auto_update_feeds;
     cfg.game_mode.enabled = dto.game_mode_enabled;
     cfg.game_mode.auto_detect = dto.game_mode_auto_detect;
     cfg.entropy_threshold = dto.entropy_threshold;
@@ -734,7 +776,7 @@ pub fn get_game_mode_status() -> GameModeStatusDto {
         game_mode_enabled: cfg.game_mode.enabled,
         auto_detect: cfg.game_mode.auto_detect,
         priority_lowered: throttled,
-        background_scans_paused: throttled,
+        background_scans_paused: throttled && cfg.game_mode.pause_background_scans,
     }
 }
 
@@ -766,6 +808,7 @@ pub struct ProcessItem {
 #[tauri::command]
 pub async fn list_processes(state: tauri::State<'_, AppState>) -> Result<Vec<ProcessItem>, String> {
     let dag = state.process_dag.clone();
+    let cache = state.signed_cache.clone();
     tokio::task::spawn_blocking(move || {
         let ctrl = aegis_platform::default_process_control();
         let procs = ctrl.enumerate_processes_snapshot().map_err(|e| e.to_string())?;
@@ -773,7 +816,7 @@ pub async fn list_processes(state: tauri::State<'_, AppState>) -> Result<Vec<Pro
         let mut items = Vec::new();
         let now = aegis_core::now_epoch() * 1000;
 
-        for (pid, ppid, raw_name) in procs.into_iter().take(250) {
+        for (pid, ppid, raw_name) in procs {
             let path_opt = ctrl.image_path(pid);
             let path_str = path_opt
                 .as_ref()
@@ -790,25 +833,20 @@ pub async fn list_processes(state: tauri::State<'_, AppState>) -> Result<Vec<Pro
                     .unwrap_or_else(|| format!("Process {pid}"))
             };
 
-            #[cfg(windows)]
-            let is_signed = path_opt
-                .as_ref()
-                .map(|p| aegis_platform::windows::verify_authenticode(p))
-                .unwrap_or(false);
+            let is_signed = path_opt.as_deref().is_some_and(|p| is_signed_cached(&cache, p));
 
-            #[cfg(not(windows))]
-            let is_signed = true;
-
-            // Ingest into Process DAG for lineage scoring & AI agent detection
-            let pevent = aegis_core::ProcessEvent {
-                pid,
-                ppid,
-                exe: path_opt.clone().unwrap_or_else(|| PathBuf::from(&name)),
-                cmdline: vec![name.clone()],
-                kind: aegis_core::ProcessEventKind::Exec,
-                timestamp_ms: now as u64,
-            };
-            dag.add_process(&pevent, is_signed, None);
+            // The background poller normally added this process already; cover the gap at startup.
+            if dag.get_process(pid).is_none() {
+                let pevent = aegis_core::ProcessEvent {
+                    pid,
+                    ppid,
+                    exe: path_opt.clone().unwrap_or_else(|| PathBuf::from(&name)),
+                    cmdline: ctrl.command_line(pid).unwrap_or_else(|| vec![name.clone()]),
+                    kind: aegis_core::ProcessEventKind::Exec,
+                    timestamp_ms: now as u64,
+                };
+                dag.add_process(&pevent, is_signed, None);
+            }
 
             let node_opt = dag.get_process(pid);
             let (risk_score, is_agent_context, agent_label, mitre_techniques, risk_factors) = if let Some(n) = node_opt {
@@ -885,186 +923,112 @@ pub async fn inspect_process_memory(pid: u32) -> Result<Vec<ThreatRow>, String> 
 }
 
 #[derive(Serialize)]
-pub struct VulnerabilityItem {
-    pub id: String,
-    pub title: String,
-    pub category: String,
-    pub severity: String,
-    pub detail: String,
-    pub status: String,
-    pub fixable: bool,
-}
-
-#[derive(Serialize)]
 pub struct SecurityAuditReport {
     pub overall_score: u8,
-    pub items: Vec<VulnerabilityItem>,
+    pub items: Vec<aegis_platform::hardening::HardeningCheck>,
     pub issues_count: usize,
 }
 
+/// Read the machine's real hardening settings.
 #[tauri::command]
 pub async fn security_audit() -> Result<SecurityAuditReport, String> {
     tokio::task::spawn_blocking(|| {
-        let mut items = Vec::new();
-
-        #[cfg(windows)]
-        {
-            items.push(VulnerabilityItem {
-                id: "UAC_STATUS".into(),
-                title: "User Account Control (UAC) Elevation Prompt".into(),
-                category: "System Policy".into(),
-                severity: "Low".into(),
-                detail: "Consent prompts enabled for Administrator approval mode.".into(),
-                status: "SECURE".into(),
-                fixable: false,
-            });
-
-            items.push(VulnerabilityItem {
-                id: "SMB1_PROTOCOL".into(),
-                title: "Legacy SMBv1 Network Protocol".into(),
-                category: "Network Protocol".into(),
-                severity: "High".into(),
-                detail: "SMBv1 is vulnerable to EternalBlue remote code execution exploits.".into(),
-                status: "DISABLED".into(),
-                fixable: true,
-            });
-
-            items.push(VulnerabilityItem {
-                id: "AUTORUN_POLICY".into(),
-                title: "Removable USB AutoRun / AutoPlay".into(),
-                category: "Physical Security".into(),
-                severity: "Medium".into(),
-                detail: "Automatic execution of USB autorun.inf files disabled.".into(),
-                status: "PROTECTED".into(),
-                fixable: true,
-            });
-
-            items.push(VulnerabilityItem {
-                id: "TAMPER_PROTECTION".into(),
-                title: "Core Kernel Driver & Tamper Protection".into(),
-                category: "Defense Hardening".into(),
-                severity: "Critical".into(),
-                detail: "Aegis DPAPI vault encryption and process termination defense active.".into(),
-                status: "ACTIVE".into(),
-                fixable: false,
-            });
-
-            items.push(VulnerabilityItem {
-                id: "BYOVD_DRIVER_BLOCKLIST".into(),
-                title: "Vulnerable Driver Blocklist (LOLDrivers / HVCI)".into(),
-                category: "Kernel Security".into(),
-                severity: "Critical".into(),
-                detail: "Active enforcement of Microsoft Recommended Driver Blocklist blocking RTCore64, gdrv, dbutil, and mhyprot2.".into(),
-                status: "ACTIVE".into(),
-                fixable: false,
-            });
-
-            items.push(VulnerabilityItem {
-                id: "MEMORY_SLEEP_OBFUSCATION".into(),
-                title: "In-Memory Evasion & Sleep Obfuscation Shield".into(),
-                category: "Memory Defense".into(),
-                severity: "High".into(),
-                detail: "Active thread wait-state analysis (Ekko, Foliage) and synthetic call stack frame validation.".into(),
-                status: "ACTIVE".into(),
-                fixable: false,
-            });
-
-            items.push(VulnerabilityItem {
-                id: "ONDEVICE_ML_GBDT".into(),
-                title: "Pure-Rust On-Device ML PE Classifier".into(),
-                category: "AI/ML Detection".into(),
-                severity: "Medium".into(),
-                detail: "EMBER 2024 / SOREL-20M 576-dim feature extractor and 14-tree GBDT ensemble (<40μs inference latency).".into(),
-                status: "ACTIVE".into(),
-                fixable: false,
-            });
-        }
-
-        #[cfg(not(windows))]
-        {
-            items.push(VulnerabilityItem {
-                id: "SSH_ROOT_LOGIN".into(),
-                title: "SSH Root Login Enforcement".into(),
-                category: "Authentication".into(),
-                severity: "High".into(),
-                detail: "Direct root SSH logins disabled in sshd_config.".into(),
-                status: "SECURE".into(),
-                fixable: true,
-            });
-
-            items.push(VulnerabilityItem {
-                id: "ASLR_ENTROPY".into(),
-                title: "Kernel ASLR & Heap Randomization".into(),
-                category: "Kernel Hardening".into(),
-                severity: "Critical".into(),
-                detail: "randomize_va_space set to level 2 (Full ASLR).".into(),
-                status: "ACTIVE".into(),
-                fixable: false,
-            });
-
-            items.push(VulnerabilityItem {
-                id: "CORE_DUMPS".into(),
-                title: "Process Memory Core Dump Protection".into(),
-                category: "Information Disclosure".into(),
-                severity: "Medium".into(),
-                detail: "fs.suid_dumpable restricted to prevent credential leakage.".into(),
-                status: "RESTRICTED".into(),
-                fixable: true,
-            });
-        }
-
-        let issues_count = items.iter().filter(|i| i.status != "SECURE" && i.status != "ACTIVE" && i.status != "PROTECTED" && i.status != "DISABLED").count();
-        let overall_score = if issues_count == 0 { 98 } else { 75 };
-
-        Ok(SecurityAuditReport {
-            overall_score,
+        let items = aegis_platform::hardening::audit();
+        let issues_count = items
+            .iter()
+            .filter(|c| c.state == aegis_platform::hardening::CheckState::Fail)
+            .count();
+        SecurityAuditReport {
+            overall_score: aegis_platform::hardening::score(&items),
             items,
             issues_count,
-        })
+        }
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
 }
 
-#[derive(Serialize)]
-pub struct FeedSyncResult {
-    pub success: bool,
-    pub hashes_updated: usize,
-    pub ips_updated: usize,
-    pub yara_rules_version: String,
-    pub message: String,
-}
-
+/// Apply the fix for one hardening check (needs administrator / root).
 #[tauri::command]
-pub async fn sync_threat_feeds() -> Result<FeedSyncResult, String> {
-    tokio::task::spawn_blocking(move || {
-        let sample_hash = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f\n44d88612fea8a8f36de82e1278abb02f\n";
-        let hashes = aegis_engine::updater::FeedManager::parse_hashes(sample_hash);
-        let sample_ips = "185.220.101.5\n194.26.29.112:443\n";
-        let (v4, v6) = aegis_engine::updater::FeedManager::parse_ips(sample_ips);
-
-        Ok(FeedSyncResult {
-            success: true,
-            hashes_updated: hashes.len() + 48190,
-            ips_updated: v4.len() + v6.len() + 1250,
-            yara_rules_version: "2026.10.18-forge-core".into(),
-            message: "Threat intelligence database synchronized with abuse.ch & YARA Forge.".into(),
-        })
-    })
-    .await
-    .map_err(|e| e.to_string())?
+pub async fn apply_hardening_fix(id: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || aegis_platform::hardening::apply_fix(&id))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
+/// Hash every registered kernel driver and report known vulnerable ones (BYOVD).
+#[tauri::command]
+pub async fn driver_audit() -> Result<Vec<ThreatRow>, String> {
+    let dets = tokio::task::spawn_blocking(|| aegis_platform::default_platform_security().audit_registered_drivers())
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(detection_rows(dets))
+}
+
+/// Download the live abuse.ch and LOLDrivers feeds, then reload the engines so
+/// new hashes apply to the next scan.
+#[tauri::command]
+pub async fn sync_threat_feeds(
+    state: tauri::State<'_, AppState>,
+) -> Result<aegis_engine::updater::SyncReport, String> {
+    let report = tokio::task::spawn_blocking(|| {
+        aegis_engine::FeedManager::new(paths::threat_intel_dir()).sync_online()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let cfg = Config::load();
+    *state.engines.lock().unwrap() = shared_engines(&cfg, &paths::user_rules_dir());
+    Ok(report)
+}
+
+/// Unix time of the last successful feed download, if any.
+fn last_feed_sync() -> Option<i64> {
+    aegis_engine::FeedManager::new(paths::threat_intel_dir())
+        .load_manifest()
+        .updated_at
+        .into_values()
+        .max()
+}
+
+/// Write decoy files into Documents and Desktop and add those folders to
+/// real-time protection so the ransomware guard sees any tampering.
 #[tauri::command]
 pub async fn deploy_ransomware_honeypot() -> Result<String, String> {
+    use aegis_behavior::ransomware::{CANARY_NAMES, CANARY_PAYLOAD};
     tokio::task::spawn_blocking(|| {
-        let home = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("."));
-        let canary_dir = home.join("Documents");
-        if canary_dir.exists() {
-            let canary_file = canary_dir.join(".aegis_sentinel_canary.docx");
-            let _ = std::fs::write(&canary_file, b"AEGIS_RANSOMWARE_CANARY_TRIPWIRE_SENTINEL_TOKEN_V2_DO_NOT_MODIFY");
+        let targets: Vec<PathBuf> = [dirs::document_dir(), dirs::desktop_dir()].into_iter().flatten().collect();
+        let mut deployed = 0;
+        for dir in &targets {
+            for name in CANARY_NAMES {
+                // create_new: never overwrite a real user file that happens to share a decoy name.
+                let written = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(dir.join(name))
+                    .and_then(|mut f| std::io::Write::write_all(&mut f, CANARY_PAYLOAD));
+                if written.is_ok() || dir.join(name).exists() {
+                    deployed += 1;
+                }
+            }
         }
-        Ok("Active · Sentinel canary honeypot active in Documents & Desktop".into())
+
+        let mut cfg = Config::load();
+        let mut added = false;
+        for dir in &targets {
+            if !cfg.realtime.paths.contains(dir) {
+                cfg.realtime.paths.push(dir.clone());
+                added = true;
+            }
+        }
+        cfg.ransomware.enabled = true;
+        cfg.save().map_err(|e| e.to_string())?;
+
+        let mut msg = format!("{deployed} decoy files in place across {} folders.", targets.len());
+        if added {
+            msg.push_str(" Restart real-time protection (aegisd) to start watching them.");
+        }
+        Ok(msg)
     })
     .await
     .map_err(|e| e.to_string())?

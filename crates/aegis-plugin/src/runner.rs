@@ -154,7 +154,7 @@ mod tests {
             entrypoint: "run.sh".into(),
             api_version: API_VERSION,
             permissions: perms,
-            targets: std::collections::BTreeMap::new(),
+            targets: [("run.sh".to_string(), crate::manifest::TargetFile::of(&entry).unwrap())].into(),
         };
         let kp = KeyPair::generate();
         let sig = kp.sign(&manifest);

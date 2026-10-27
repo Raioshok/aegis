@@ -57,6 +57,11 @@ pub struct TrainingFeedback {
 pub struct GatewayState {
     pub stats: Arc<RwLock<TrainingStats>>,
     pub log_path: PathBuf,
+    /// Shared secret (`AEGIS_GATEWAY_TOKEN`) guests must send as `X-Aegis-Token`
+    /// to write; unset means every write is refused, since writes feed the hash list.
+    pub token: Option<String>,
+    /// (engine name, status) of the detection engines this host loads, computed once at start.
+    pub engines: Arc<Vec<(String, String)>>,
 }
 
 impl GatewayState {
@@ -72,6 +77,13 @@ impl GatewayState {
         Self {
             stats: Arc::new(RwLock::new(TrainingStats::default())),
             log_path,
+            token: std::env::var("AEGIS_GATEWAY_TOKEN").ok().filter(|t| !t.is_empty()),
+            engines: Arc::new(
+                aegis_engine::default_engines(&aegis_core::Config::load(), &aegis_core::paths::user_rules_dir())
+                    .iter()
+                    .map(|e| (e.name().to_string(), e.status()))
+                    .collect(),
+            ),
         }
     }
 
@@ -145,6 +157,9 @@ impl GatewayServer {
         let addr = SocketAddr::from(([0, 0, 0, 0], self.port));
         let listener = TcpListener::bind(addr).await?;
         tracing::info!("Aegis Telemetry & Training Gateway listening on {addr}");
+        if self.state.token.is_none() {
+            tracing::warn!("AEGIS_GATEWAY_TOKEN is not set; report and feedback uploads will be refused");
+        }
 
         loop {
             match listener.accept().await {
@@ -160,6 +175,10 @@ impl GatewayServer {
             }
         }
     }
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 async fn handle_connection(
@@ -187,7 +206,16 @@ async fn handle_connection(
         ""
     };
 
+    let token_ok = state.token.as_deref().is_some_and(|want| {
+        lines
+            .clone()
+            .take_while(|l| !l.is_empty())
+            .find_map(|l| l.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case("x-aegis-token")))
+            .is_some_and(|(_, got)| constant_time_eq(got.trim().as_bytes(), want.as_bytes()))
+    });
+
     let (status, resp_body) = match (method, path) {
+        ("POST", _) if !token_ok => ("403 Forbidden", r#"{"error":"missing or bad X-Aegis-Token"}"#.into()),
         ("POST", "/api/v1/telemetry/report") => {
             if let Ok(report) = serde_json::from_str::<TelemetryReport>(body) {
                 state.record_report(report).await;
@@ -208,37 +236,34 @@ async fn handle_connection(
             ("200 OK", serde_json::to_string(&stats).unwrap_or("{}".into()))
         }
         ("GET", "/train.py") | ("GET", "/api/v1/train.py") => {
-            let script_path = std::path::PathBuf::from(r"C:\Users\raio\Downloads\Telegram Desktop\Projects\aegis\scripts\training\aegis-guest-train.py");
-            let content = std::fs::read_to_string(script_path)
-                .unwrap_or_else(|_| "print('Aegis Gateway Live')".to_string());
+            let candidate_paths = [
+                std::path::PathBuf::from(r"scripts\training\aegis-guest-train.py"),
+                std::path::PathBuf::from(r"..\scripts\training\aegis-guest-train.py"),
+                std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join(r"scripts\training\aegis-guest-train.py"))).unwrap_or_default(),
+                std::path::PathBuf::from(r"C:\Users\raio\Downloads\Telegram Desktop\Projects\aegis\scripts\training\aegis-guest-train.py"),
+            ];
+            let content = candidate_paths.iter().find(|p| p.exists())
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .unwrap_or_else(|| "print('Aegis Gateway Live')".to_string());
             ("200 OK", content)
         }
         ("GET", "/train.sh") => {
-            let content = "#!/usr/bin/env bash\ncurl -sSL http://192.168.18.166:9090/train.py | python3\n";
-            ("200 OK", content.to_string())
+            let host_header = lines.find(|l| l.to_ascii_lowercase().starts_with("host:"))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .unwrap_or("172.31.0.1:9090");
+            let content = format!("#!/usr/bin/env bash\ncurl -sSL http://{host_header}/train.py | python3\n");
+            ("200 OK", content)
         }
-        ("GET", "/api/v1/signatures") => {
-            let home = std::env::var("USERPROFILE")
-                .or_else(|_| std::env::var("HOME"))
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("."));
-            let hash_file = home.join(".config").join("aegis").join("threat-intel").join("hashes.txt");
-            let hashes_count = std::fs::read_to_string(hash_file)
-                .map(|c| c.lines().filter(|l| !l.starts_with('#')).count())
-                .unwrap_or(352);
-            (
-                "200 OK",
-                serde_json::json!({
-                    "engine": "Aegis Total Security",
-                    "version": "0.1.0-training-gateway",
-                    "yara_rules_active": 37,
-                    "behavioral_rules_active": 13,
-                    "threat_hashes_indexed": hashes_count,
-                    "status": "ready"
-                })
-                .to_string(),
-            )
-        }
+        ("GET", "/api/v1/signatures") => (
+            "200 OK",
+            serde_json::json!({
+                "engine": "Aegis",
+                "version": env!("CARGO_PKG_VERSION"),
+                "engines": state.engines.iter().map(|(n, s)| serde_json::json!({"name": n, "status": s})).collect::<Vec<_>>(),
+                "status": "ready"
+            })
+            .to_string(),
+        ),
         ("POST", "/api/v1/train/feedback") => {
             if let Ok(feedback) = serde_json::from_str::<TrainingFeedback>(body) {
                 state.auto_ingest_hash(&feedback.sample_sha256);

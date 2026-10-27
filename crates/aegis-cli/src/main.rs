@@ -422,30 +422,23 @@ fn run(cli: &Cli) -> aegis_core::Result<i32> {
             let mut cfg = aegis_core::Config::load();
             match action {
                 ShieldsCmd::Status => {
-                    println!("Aegis Modular Protection Shields:");
-                    println!("  Real-time File System: {}", if cfg.shields.realtime_filesystem { "ARMED" } else { "OFF" });
-                    println!("  Memory & Injection:    {}", if cfg.shields.memory_defense { "ARMED" } else { "OFF" });
-                    println!("  Network & Firewall:    {}", if cfg.shields.network_firewall { "ARMED" } else { "OFF" });
-                    println!("  Ransomware Watchdog:   {}", if cfg.shields.ransomware_guard { "ARMED" } else { "OFF" });
-                    println!("  Cloud Threat Feeds:    {}", if cfg.shields.cloud_threat_feeds { "ARMED" } else { "OFF" });
+                    let on = |b: bool| if b { "ON" } else { "OFF" };
+                    println!("Aegis protection components:");
+                    println!("  Real-time file protection:  {}", on(cfg.realtime.enabled));
+                    println!("  Auto-quarantine:            {}", on(cfg.realtime.auto_quarantine));
+                    println!("  Ransomware guard:           {}", on(cfg.ransomware.enabled));
+                    println!("  Daily database updates:     {}", on(cfg.auto_update_feeds));
                 }
-                ShieldsCmd::EnableAll => {
-                    cfg.shields.realtime_filesystem = true;
-                    cfg.shields.memory_defense = true;
-                    cfg.shields.network_firewall = true;
-                    cfg.shields.ransomware_guard = true;
-                    cfg.shields.cloud_threat_feeds = true;
+                ShieldsCmd::EnableAll | ShieldsCmd::DisableAll => {
+                    let on = matches!(action, ShieldsCmd::EnableAll);
+                    cfg.realtime.enabled = on;
+                    cfg.ransomware.enabled = on;
+                    cfg.auto_update_feeds = on;
                     cfg.save()?;
-                    println!("All protection shields ARMED.");
-                }
-                ShieldsCmd::DisableAll => {
-                    cfg.shields.realtime_filesystem = false;
-                    cfg.shields.memory_defense = false;
-                    cfg.shields.network_firewall = false;
-                    cfg.shields.ransomware_guard = false;
-                    cfg.shields.cloud_threat_feeds = false;
-                    cfg.save()?;
-                    println!("All protection shields DISABLED.");
+                    println!(
+                        "Real-time protection, ransomware guard and database updates {}. Restart aegisd to apply.",
+                        if on { "enabled" } else { "disabled" }
+                    );
                 }
             }
             Ok(0)

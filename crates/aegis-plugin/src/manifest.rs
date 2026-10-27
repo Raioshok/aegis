@@ -10,6 +10,18 @@ pub struct TargetFile {
     pub sha256: String,
 }
 
+impl TargetFile {
+    /// Pin a file's current size and SHA-256.
+    pub fn of(path: &std::path::Path) -> std::io::Result<Self> {
+        use sha2::{Digest, Sha256};
+        let bytes = std::fs::read(path)?;
+        Ok(Self {
+            size: bytes.len() as u64,
+            sha256: hex::encode(Sha256::digest(&bytes)),
+        })
+    }
+}
+
 /// Capabilities a plugin may request. Aegis enforces least privilege: a plugin
 /// only receives the permissions its manifest declares *and* the host grants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,7 +90,8 @@ impl PluginManifest {
                 return Err("entrypoint cannot contain '..'");
             }
         }
-        if !self.targets.is_empty() && !self.targets.contains_key(entry) {
+        // Without a pinned hash the signature would not cover the code that runs.
+        if !self.targets.contains_key(entry) {
             return Err("entrypoint not listed in targets manifest");
         }
         Ok(())

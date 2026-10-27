@@ -10,9 +10,6 @@ use std::path::PathBuf;
 fn firewall_state() -> PathBuf {
     paths::config_dir().join("firewall.json")
 }
-fn blocklist_file() -> PathBuf {
-    paths::config_dir().join("ip-blocklist.txt")
-}
 fn plugins_dir() -> PathBuf {
     paths::config_dir().join("plugins")
 }
@@ -185,7 +182,7 @@ fn ipnetwork_single(a: std::net::IpAddr) -> ipnetwork::IpNetwork {
 // --- network IDS ------------------------------------------------------
 
 pub fn network_scan(json: bool) -> i32 {
-    let bl = IpBlocklist::from_file(&blocklist_file());
+    let bl = IpBlocklist::load_default();
     let dets = aegis_network::scan(&bl);
     if json {
         println!(
@@ -320,9 +317,9 @@ pub fn plugins_keygen() -> i32 {
 
 /// `aegis plugins sign <dir> --key <private_hex>` — sign a plugin's manifest.
 pub fn plugins_sign(dir: &std::path::Path, private_hex: &str) -> i32 {
-    use aegis_plugin::{KeyPair, PluginManifest};
+    use aegis_plugin::{KeyPair, PluginManifest, TargetFile};
     let manifest_path = dir.join("plugin.json");
-    let manifest: PluginManifest = match std::fs::read_to_string(&manifest_path) {
+    let mut manifest: PluginManifest = match std::fs::read_to_string(&manifest_path) {
         Ok(t) => match serde_json::from_str(&t) {
             Ok(m) => m,
             Err(e) => {
@@ -342,6 +339,20 @@ pub fn plugins_sign(dir: &std::path::Path, private_hex: &str) -> i32 {
             return 2;
         }
     };
+    // Pin the entrypoint so the signature also covers the code that runs.
+    match TargetFile::of(&dir.join(&manifest.entrypoint)) {
+        Ok(t) => {
+            manifest.targets.insert(manifest.entrypoint.clone(), t);
+        }
+        Err(e) => {
+            eprintln!("cannot read entrypoint {}: {e}", manifest.entrypoint);
+            return 2;
+        }
+    }
+    if let Err(e) = std::fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest).unwrap_or_default()) {
+        eprintln!("failed to update plugin.json: {e}");
+        return 2;
+    }
     let sig = kp.sign(&manifest);
     if let Err(e) = std::fs::write(dir.join("plugin.sig"), &sig) {
         eprintln!("failed to write plugin.sig: {e}");

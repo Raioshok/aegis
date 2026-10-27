@@ -105,7 +105,7 @@ def post_telemetry(report):
     req = urllib.request.Request(
         GATEWAY_URL,
         data=data,
-        headers={"Content-Type": "application/json"}
+        headers={"Content-Type": "application/json", "X-Aegis-Token": os.environ.get("AEGIS_GATEWAY_TOKEN", "")}
     )
     try:
         with urllib.request.urlopen(req, timeout=3) as resp:

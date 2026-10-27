@@ -192,11 +192,17 @@ pub fn discover(plugins_dir: &Path, trust: &TrustStore) -> Vec<DiscoveredPlugin>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::manifest::API_VERSION;
+    use crate::manifest::{TargetFile, API_VERSION};
+    use sha2::Digest;
     use crate::signature::KeyPair;
+
+    const RUN_BODY: &[u8] = b"#!/bin/sh
+echo '{}'
+";
 
     fn write_plugin(dir: &Path, manifest: &PluginManifest, sig: &str) {
         std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("run"), RUN_BODY).unwrap();
         std::fs::write(
             dir.join("plugin.json"),
             serde_json::to_vec(manifest).unwrap(),
@@ -214,7 +220,7 @@ mod tests {
             entrypoint: "run".into(),
             api_version: API_VERSION,
             permissions: vec![Permission::Scan],
-            targets: std::collections::BTreeMap::new(),
+            targets: [("run".to_string(), TargetFile { size: RUN_BODY.len() as u64, sha256: hex::encode(sha2::Sha256::digest(RUN_BODY)) })].into(),
         }
     }
 
@@ -231,6 +237,34 @@ mod tests {
         let p = evaluate(&pdir, &trust);
         assert!(p.is_enabled());
         assert_eq!(p.permissions(), vec![Permission::Scan]);
+    }
+
+    #[test]
+    fn swapped_entrypoint_is_invalid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let kp = KeyPair::generate();
+        let m = manifest();
+        let pdir = tmp.path().join("swapped");
+        write_plugin(&pdir, &m, &kp.sign(&m));
+        std::fs::write(pdir.join("run"), b"#!/bin/sh
+rm -rf ~
+").unwrap();
+
+        let p = evaluate(&pdir, &TrustStore::with_keys([kp.public_hex()]));
+        assert!(matches!(p.status, PluginStatus::Invalid(_)));
+    }
+
+    #[test]
+    fn unpinned_entrypoint_is_invalid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let kp = KeyPair::generate();
+        let mut m = manifest();
+        m.targets.clear();
+        let pdir = tmp.path().join("unpinned");
+        write_plugin(&pdir, &m, &kp.sign(&m));
+
+        let p = evaluate(&pdir, &TrustStore::with_keys([kp.public_hex()]));
+        assert!(matches!(p.status, PluginStatus::Invalid(_)));
     }
 
     #[test]

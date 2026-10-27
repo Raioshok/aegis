@@ -15,9 +15,14 @@ pub struct HashEngine {
 }
 
 const BUNDLED_MALWARE_HASHES: &str = include_str!("../../../rules/malware_hashes.txt");
+const EICAR_SHA256: &str = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f";
+
+fn builtin_lines<'a>() -> impl Iterator<Item = &'a str> {
+    std::iter::once(EICAR_SHA256).chain(BUNDLED_MALWARE_HASHES.lines())
+}
 
 impl HashEngine {
-    /// Build from an iterator of hex digests.
+    /// Build from an iterator of hex digests (exactly these, no built-ins).
     pub fn from_hashes<I, S>(iter: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -41,20 +46,23 @@ impl HashEngine {
         Self { hashes }
     }
 
-    /// Load newline-delimited hashes from a file, tolerating a missing file.
+    /// Load newline-delimited hashes from a file on top of the built-in set,
+    /// tolerating a missing file.
     pub fn from_file(path: &Path) -> Self {
-        match std::fs::read_to_string(path) {
-            Ok(text) => Self::from_hashes(text.lines()),
-            Err(_) => Self::with_builtin(),
-        }
+        let text = std::fs::read_to_string(path).unwrap_or_default();
+        Self::from_hashes(builtin_lines().chain(text.lines()))
     }
 
     /// Seed with built-in verified threat hashes and the EICAR test signature.
     pub fn with_builtin() -> Self {
-        let eicar = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f";
-        let mut lines: Vec<&str> = vec![eicar];
-        lines.extend(BUNDLED_MALWARE_HASHES.lines());
-        Self::from_hashes(lines)
+        Self::from_hashes(builtin_lines())
+    }
+
+    /// Add more digests (e.g. from synced feeds).
+    pub fn extend(&mut self, more: impl IntoIterator<Item = [u8; 32]>) {
+        self.hashes.extend(more);
+        self.hashes.sort_unstable();
+        self.hashes.dedup();
     }
 
     pub fn len(&self) -> usize {
@@ -69,13 +77,18 @@ impl HashEngine {
         self.hashes.binary_search(sha256_bytes).is_ok()
     }
 
+    #[inline]
     pub fn contains_hex(&self, hex_str: &str) -> bool {
-        if let Ok(bytes) = hex::decode(hex_str.trim()) {
-            if let Ok(arr) = bytes.try_into() {
-                return self.contains_hash(&arr);
-            }
+        let trimmed = hex_str.trim();
+        if trimmed.len() != 64 {
+            return false;
         }
-        false
+        let mut arr = [0u8; 32];
+        if hex::decode_to_slice(trimmed, &mut arr).is_ok() {
+            self.contains_hash(&arr)
+        } else {
+            false
+        }
     }
 }
 
@@ -131,5 +144,17 @@ mod tests {
             sha256: "0000000000000000000000000000000000000000000000000000000000000000",
         };
         assert!(eng.scan(&ctx).is_empty());
+    }
+
+    #[test]
+    fn feed_file_adds_to_builtin_set() {
+        let feed = std::env::temp_dir().join(format!("aegis-feed-{}.txt", std::process::id()));
+        let extra = "11".repeat(32);
+        std::fs::write(&feed, &extra).unwrap();
+        let eng = HashEngine::from_file(&feed);
+        std::fs::remove_file(&feed).ok();
+        assert!(eng.contains_hex(&extra));
+        assert!(eng.contains_hex(EICAR_SHA256));
+        assert_eq!(eng.len(), HashEngine::with_builtin().len() + 1);
     }
 }

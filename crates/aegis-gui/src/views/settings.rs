@@ -1,4 +1,4 @@
-use eframe::egui::{self, RichText, Vec2};
+use eframe::egui::{self, RichText};
 use crate::app::AegisApp;
 use crate::theme::*;
 
@@ -8,7 +8,7 @@ impl AegisApp {
             // Header
             egui::Frame::none()
                 .fill(CARD_BG)
-                .stroke(egui::Stroke::new(1.0, BORDER_COLOR))
+                .stroke(egui::Stroke::new(1.0_f32, BORDER_COLOR))
                 .rounding(egui::Rounding::same(8.0))
                 .inner_margin(egui::Margin::symmetric(20.0, 16.0))
                 .show(ui, |ui| {
@@ -25,15 +25,15 @@ impl AegisApp {
 
             let toggles = [
                 ("Pure-Rust YARA-X Engine", "Compiles AST rules for Ransomware, Wipers, Droppers, and RAT families", &mut self.config.engines.yara),
-                ("Precompiled SHA-256 Hash Database", "309+ verified threat hashes with sub-microsecond binary search", &mut self.config.engines.hash),
+                ("SHA-256 Hash Database", "Built-in and downloaded known-bad hashes, binary search", &mut self.config.engines.hash),
                 ("Goblin PE/ELF Heuristics Engine", "Detects anomalous entrypoints, RWX sections, and high-entropy packers", &mut self.config.engines.heuristic),
-                ("Memory Evasion & Anti-Tamper Shield", "Audits module stomping, unbacked execution, and sleep masking", &mut self.config.shields.memory_defense),
+                ("On-Device Machine Learning", "Gradient boosted trees over PE structure features", &mut self.config.engines.ml),
             ];
 
             for (title, desc, toggle) in toggles {
                 egui::Frame::none()
                     .fill(CARD_BG)
-                    .stroke(egui::Stroke::new(1.0, BORDER_COLOR))
+                    .stroke(egui::Stroke::new(1.0_f32, BORDER_COLOR))
                     .rounding(egui::Rounding::same(6.0))
                     .inner_margin(egui::Margin::symmetric(16.0, 14.0))
                     .show(ui, |ui| {
@@ -62,7 +62,7 @@ impl AegisApp {
             // System Information
             egui::Frame::none()
                 .fill(CARD_BG)
-                .stroke(egui::Stroke::new(1.0, BORDER_COLOR))
+                .stroke(egui::Stroke::new(1.0_f32, BORDER_COLOR))
                 .rounding(egui::Rounding::same(6.0))
                 .inner_margin(egui::Margin::symmetric(16.0, 14.0))
                 .show(ui, |ui| {

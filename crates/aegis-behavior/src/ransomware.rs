@@ -83,6 +83,26 @@ pub struct RansomwareAlert {
     pub sample_paths: Vec<PathBuf>,
 }
 
+/// Decoy file names deployed by the honeypot into Documents and Desktop.
+pub const CANARY_NAMES: &[&str] = &[
+    ".aegis_sentinel_canary.docx",
+    "!financial_audit_2026.xlsx",
+    "confidential_passwords.docx",
+    "corporate_strategy_q4.pdf",
+];
+/// Exact content of an untouched canary.
+pub const CANARY_PAYLOAD: &[u8] = b"AEGIS_RANSOMWARE_CANARY_TRIPWIRE_SENTINEL_TOKEN_V2_DO_NOT_MODIFY";
+
+/// A canary was written to and no longer holds its sentinel content.
+fn canary_tripped(path: &Path) -> bool {
+    let is_canary = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| CANARY_NAMES.contains(&n));
+    // Unreadable after a write (locked, replaced) counts as tampered too.
+    is_canary && std::fs::read(path).map_or(true, |b| b != CANARY_PAYLOAD)
+}
+
 /// Stateful sliding-window ransomware detector.
 #[derive(Debug)]
 pub struct RansomwareGuard {
@@ -136,6 +156,18 @@ impl RansomwareGuard {
             pid,
         });
         self.evict(now_ms);
+
+        // A tampered decoy is conclusive on its own, so it skips the debounce.
+        if kind == EventType::Write && canary_tripped(path) {
+            self.last_alert_ms = Some(now_ms);
+            return Some(RansomwareAlert {
+                reason: AlertReason::CanaryTripped,
+                pid,
+                writes_in_window: self.window.len(),
+                high_entropy_writes: 0,
+                sample_paths: vec![path.to_path_buf()],
+            });
+        }
 
         // Debounce repeated alerts within one window.
         if let Some(last) = self.last_alert_ms {
@@ -259,6 +291,23 @@ mod tests {
             min_high_entropy: 6,
             rename_storm: 6,
         }
+    }
+
+    #[test]
+    fn canary_trips_only_when_content_changes() {
+        let dir = std::env::temp_dir().join(format!("aegis-canary-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let canary = dir.join(CANARY_NAMES[2]);
+        let mut g = RansomwareGuard::new(cfg());
+
+        std::fs::write(&canary, CANARY_PAYLOAD).unwrap();
+        assert!(g.observe(&canary, EventType::Write, 4.0, None, 1).is_none(), "deploying the canary must not trip it");
+
+        std::fs::write(&canary, b"ENCRYPTED-BY-LOCKER").unwrap();
+        let alert = g.observe(&canary, EventType::Write, 7.9, Some(42), 2).expect("tampered canary trips");
+        assert_eq!(alert.reason, AlertReason::CanaryTripped);
+        assert_eq!(alert.pid, Some(42));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

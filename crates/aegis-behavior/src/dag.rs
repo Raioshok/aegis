@@ -16,7 +16,6 @@ use std::sync::RwLock;
 
 /// Known AI Agent, IDE, or Local LLM Runner context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
 pub enum AgentType {
     Cursor,
     ClaudeCode,
@@ -25,6 +24,10 @@ pub enum AgentType {
     Codex,
     Ollama,
     LmStudio,
+    JettsTUI,
+    Windsurf,
+    Aider,
+    Devin,
     CustomAgent,
 }
 
@@ -38,6 +41,10 @@ impl AgentType {
             Self::Codex => "Codex Agent",
             Self::Ollama => "Ollama Local LLM",
             Self::LmStudio => "LM Studio",
+            Self::JettsTUI => "JettsTUI Desktop Agent",
+            Self::Windsurf => "Windsurf IDE Agent",
+            Self::Aider => "Aider Coding Agent",
+            Self::Devin => "Devin Autonomous Agent",
             Self::CustomAgent => "AI Agent Context",
         }
     }
@@ -194,6 +201,18 @@ impl ProcessTreeDag {
         if exe.contains("lmstudio") || exe.contains("lm-studio") {
             return Some(AgentType::LmStudio);
         }
+        if exe.contains("jetts") || cmdline_lower.contains("jettstui") || cmdline_lower.contains("jetts") {
+            return Some(AgentType::JettsTUI);
+        }
+        if exe.contains("windsurf") || cmdline_lower.contains("windsurf") || cmdline_lower.contains("codeium") {
+            return Some(AgentType::Windsurf);
+        }
+        if exe.contains("aider") || cmdline_lower.contains("aider") {
+            return Some(AgentType::Aider);
+        }
+        if exe.contains("devin") || cmdline_lower.contains("devin") {
+            return Some(AgentType::Devin);
+        }
         if cmdline_lower.contains("--agent") || cmdline_lower.contains("mcp-server") || cmdline_lower.contains("modelcontextprotocol") {
             return Some(AgentType::CustomAgent);
         }
@@ -216,10 +235,13 @@ impl ProcessTreeDag {
         let cmdline_lower = cmdline_str.to_ascii_lowercase();
         let cmdline_entropy = calculate_entropy(&cmdline_str);
 
+        // Split on both separators: Windows-style paths also reach Linux hosts (e.g. guest telemetry).
         let exe_name = event
             .exe
-            .file_name()
-            .and_then(|n| n.to_str())
+            .to_string_lossy()
+            .rsplit(['/', '\\'])
+            .next()
+            .filter(|n| !n.is_empty())
             .unwrap_or("process")
             .to_string();
         let exe_name_lower = exe_name.to_ascii_lowercase();

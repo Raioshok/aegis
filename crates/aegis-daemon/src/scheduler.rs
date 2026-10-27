@@ -34,6 +34,11 @@ pub async fn run(state: Arc<DaemonState>, shutdown: Arc<Notify>) {
                 break;
             }
             _ = ticker.tick() => {
+                let gm = state.config_snapshot().game_mode;
+                if gm.enabled && gm.pause_background_scans && (!gm.auto_detect || aegis_platform::is_gaming_active()) {
+                    tracing::info!("game mode active; skipping scheduled scan");
+                    continue;
+                }
                 run_once(&state, &target).await;
             }
         }
@@ -82,5 +87,35 @@ async fn run_once(state: &Arc<DaemonState>, target: &std::path::Path) {
             "scheduled scan finished"
         ),
         Err(e) => tracing::error!(error = %e, "scheduled scan failed"),
+    }
+}
+
+/// Download the threat databases once a day (first run 5 minutes after start)
+/// while `auto_update_feeds` is on, then reload the engines so new hashes apply.
+pub async fn run_feed_updates(state: Arc<DaemonState>, shutdown: Arc<Notify>) {
+    let mut ticker = tokio::time::interval_at(
+        tokio::time::Instant::now() + Duration::from_secs(300),
+        Duration::from_secs(24 * 3600),
+    );
+    loop {
+        tokio::select! {
+            _ = shutdown.notified() => break,
+            _ = ticker.tick() => {
+                if !state.config_snapshot().auto_update_feeds {
+                    continue;
+                }
+                let report = tokio::task::spawn_blocking(|| {
+                    aegis_engine::FeedManager::new(aegis_core::paths::threat_intel_dir()).sync_online()
+                })
+                .await;
+                match report {
+                    Ok(r) => {
+                        tracing::info!(hashes = r.malware_hashes, ips = r.c2_ips, drivers = r.vulnerable_drivers, errors = ?r.errors, "threat databases updated");
+                        state.reload();
+                    }
+                    Err(e) => tracing::error!(error = %e, "feed update task failed"),
+                }
+            }
+        }
     }
 }

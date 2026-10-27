@@ -45,6 +45,14 @@ impl IpBlocklist {
         }
     }
 
+    /// The user's `ip-blocklist.txt` plus the synced Feodo Tracker C2 feed.
+    pub fn load_default() -> Self {
+        let read = |p: std::path::PathBuf| std::fs::read_to_string(p).unwrap_or_default();
+        let user = read(aegis_core::paths::config_dir().join("ip-blocklist.txt"));
+        let feed = read(aegis_core::paths::threat_intel_dir().join("feodotracker.ips"));
+        Self::from_lines(user.lines().chain(feed.lines()))
+    }
+
     pub fn len(&self) -> usize {
         self.nets.len()
     }

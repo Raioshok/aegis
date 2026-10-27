@@ -1,4 +1,4 @@
-use eframe::egui::{self, Color32, RichText, Vec2};
+use eframe::egui::{self, Color32, RichText};
 use crate::app::AegisApp;
 use crate::theme::*;
 
@@ -8,7 +8,7 @@ impl AegisApp {
             // Header
             egui::Frame::none()
                 .fill(CARD_BG)
-                .stroke(egui::Stroke::new(1.0, BORDER_COLOR))
+                .stroke(egui::Stroke::new(1.0_f32, BORDER_COLOR))
                 .rounding(egui::Rounding::same(8.0))
                 .inner_margin(egui::Margin::symmetric(20.0, 16.0))
                 .show(ui, |ui| {
@@ -33,21 +33,20 @@ impl AegisApp {
             ui.add_space(16.0);
 
             // Active Memory Shields
-            ui.label(RichText::new("IN-MEMORY EVASION DETECTORS").size(13.0).strong().color(TEXT_PRIMARY));
+            ui.label(RichText::new("IN-MEMORY EVASION DETECTORS (RUN BY MEMORY AUDIT)").size(13.0).strong().color(TEXT_PRIMARY));
             ui.add_space(8.0);
 
             let detectors = [
-                ("Module Stomping Diffing", "Compares on-disk .text section SHA-256 against live in-memory mapping to detect overwritten DLL stubs", "ACTIVE"),
-                ("FunctionPeekaboo TEB Inspector", "Audits TEB.UserReserved[0..4] pointers to catch per-function sleep obfuscation and thread masking", "ACTIVE"),
-                ("Unbacked Thread Hunter", "Identifies threads executing inside dynamically allocated RWX/RX regions not backed by valid file mappings", "ACTIVE"),
-                ("Early Cascade Injection", "Detects suspended Shim engine hijacking targeting apphelp, .sdb, and werfault.exe", "ACTIVE"),
-                ("PoolParty Interception", "Intercepts thread-pool work insertion and IO completion port hijacking routines", "ACTIVE"),
+                ("Module Stomping Diffing", "Compares on-disk .text section SHA-256 against the live in-memory mapping to detect overwritten DLL code", "ON DEMAND"),
+                ("FunctionPeekaboo TEB Inspector", "Checks TEB.UserReserved[0..4] pointers for per-function sleep obfuscation", "ON DEMAND"),
+                ("Unbacked Thread Hunter", "Finds threads whose start address or instruction pointer is in memory not backed by a file", "ON DEMAND"),
+                ("Thread Hijack / PoolParty", "Flags threads executing from unbacked memory, the footprint of thread-pool hijacking", "ON DEMAND"),
             ];
 
             for (title, desc, status) in detectors {
                 egui::Frame::none()
                     .fill(CARD_BG)
-                    .stroke(egui::Stroke::new(1.0, BORDER_COLOR))
+                    .stroke(egui::Stroke::new(1.0_f32, BORDER_COLOR))
                     .rounding(egui::Rounding::same(6.0))
                     .inner_margin(egui::Margin::symmetric(16.0, 12.0))
                     .show(ui, |ui| {
@@ -72,7 +71,7 @@ impl AegisApp {
 
             egui::Frame::none()
                 .fill(CARD_BG)
-                .stroke(egui::Stroke::new(1.0, BORDER_COLOR))
+                .stroke(egui::Stroke::new(1.0_f32, BORDER_COLOR))
                 .rounding(egui::Rounding::same(6.0))
                 .inner_margin(egui::Margin::same(16.0))
                 .show(ui, |ui| {

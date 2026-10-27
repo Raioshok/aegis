@@ -6,8 +6,8 @@ use aegis_storage::{Database, QuarantineRecord};
 use aes_gcm::Aes256Gcm;
 use chacha20poly1305::aead::{Aead, KeyInit, OsRng, Payload};
 use chacha20poly1305::{AeadCore, ChaCha20Poly1305, Key, Nonce};
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -74,16 +74,16 @@ impl<'a> Quarantine<'a> {
     }
 
     /// Encrypt `path`'s contents into the vault, record metadata, and remove
-    /// the original. Returns the stored record.
+    /// the original. Returns the stored record; its `sha256` field is the vault
+    /// id `<content sha256>-<path tag>`, so one payload at two paths keeps two entries.
     pub fn quarantine(
         &self,
         path: &Path,
-        sha256: &str,
         threat: &str,
         engine: &str,
         severity: i64,
-        quarantined_at: i64,
     ) -> Result<QuarantineRecord> {
+        let quarantined_at = aegis_core::now_epoch();
         // Read file metadata before reading content
         let meta = std::fs::symlink_metadata(path).map_err(|e| AegisError::io(path, e))?;
         if meta.file_type().is_symlink() {
@@ -103,10 +103,14 @@ impl<'a> Quarantine<'a> {
 
         let plaintext = std::fs::read(path).map_err(|e| AegisError::io(path, e))?;
         let size = plaintext.len() as u64;
+        // Hash what we actually encrypt, never a caller-supplied value.
+        let sha256 = hex(&Sha256::digest(&plaintext));
+        let original_path = path.to_string_lossy().into_owned();
+        let id = format!("{sha256}-{}", &hex(&Sha256::digest(original_path.as_bytes()))[..8]);
 
         let blob_meta = BlobMetadata {
-            original_path: path.to_string_lossy().into_owned(),
-            sha256: sha256.to_string(),
+            original_path: original_path.clone(),
+            sha256: sha256.clone(),
             size,
             threat: threat.to_string(),
             engine: engine.to_string(),
@@ -140,15 +144,15 @@ impl<'a> Quarantine<'a> {
         blob.extend_from_slice(&meta_bytes);
         blob.extend_from_slice(&ciphertext);
 
-        let stored_name = format!("{sha256}.aegis");
+        let stored_name = format!("{id}.aegis");
         let stored_path = self.dir.join(&stored_name);
         std::fs::write(&stored_path, &blob).map_err(|e| AegisError::io(&stored_path, e))?;
         set_owner_only(&stored_path);
 
         // Mark record pending BEFORE removing original (crash safety)
         let rec = QuarantineRecord {
-            sha256: sha256.to_string(),
-            original_path: path.to_string_lossy().into_owned(),
+            sha256: id.clone(),
+            original_path,
             threat: threat.to_string(),
             engine: engine.to_string(),
             severity,
@@ -163,7 +167,7 @@ impl<'a> Quarantine<'a> {
         // Now remove the original file
         match std::fs::remove_file(path) {
             Ok(_) => {
-                let _ = self.db.quarantine().mark_status(sha256, "quarantined");
+                let _ = self.db.quarantine().mark_status(&id, "quarantined");
             }
             Err(e) => {
                 tracing::warn!(
@@ -289,30 +293,33 @@ impl<'a> Quarantine<'a> {
     pub fn list(&self) -> Result<Vec<QuarantineRecord>> {
         self.db.quarantine().all()
     }
+
+    /// Prune quarantined records older than `days` to recover disk space.
+    pub fn prune_older_than(&self, days: u32) -> Result<usize> {
+        let cutoff = aegis_core::now_epoch() - (days as i64 * 86400);
+        let records = self.list()?;
+        let mut count = 0;
+        for rec in records {
+            if rec.quarantined_at < cutoff {
+                self.delete(&rec.sha256)?;
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
 }
 
-/// Load the 32-byte vault key, generating (0600) it on first use.
+/// Load the 32-byte vault key using platform-native protected secret stores (DPAPI on Windows).
 /// Never regenerates an existing key to prevent data loss.
 fn load_or_create_key() -> Result<Zeroizing<[u8; 32]>> {
-    let path = paths::keyring_file();
-    if path.exists() {
-        let bytes = std::fs::read(&path).map_err(|e| AegisError::io(&path, e))?;
-        if bytes.len() == 32 {
-            let mut key = [0u8; 32];
-            key.copy_from_slice(&bytes);
-            return Ok(Zeroizing::new(key));
-        }
-        return Err(AegisError::Crypto(format!(
-            "quarantine keyring file at {} is corrupted (expected 32 bytes, got {}); refusing to regenerate to protect existing quarantined files",
-            path.display(),
-            bytes.len()
-        )));
-    }
-    let mut key = [0u8; 32];
-    OsRng.fill_bytes(&mut key);
-    std::fs::write(&path, key).map_err(|e| AegisError::io(&path, e))?;
-    set_owner_only(&path);
-    Ok(Zeroizing::new(key))
+    let store = aegis_platform::default_secret_store();
+    let key = store.load_or_create_vault_key()?;
+    set_owner_only(&paths::keyring_file());
+    Ok(key)
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn set_owner_only(path: &Path) {
@@ -325,9 +332,13 @@ fn set_owner_only(path: &Path) {
             let _ = std::fs::set_permissions(path, perm);
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        let _ = path;
+        if let Ok(meta) = std::fs::metadata(path) {
+            let mut perm = meta.permissions();
+            perm.set_readonly(false);
+            let _ = std::fs::set_permissions(path, perm);
+        }
     }
 }
 
@@ -347,17 +358,8 @@ mod tests {
         let original = b"\x7fELF...simulated malicious payload...\x00\x01\x02";
         std::fs::write(&victim, original).unwrap();
 
-        let sha256 = "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff";
-        let rec = q
-            .quarantine(
-                &victim,
-                sha256,
-                "EICAR.Test",
-                "test",
-                3,
-                1_700_000_000,
-            )
-            .unwrap();
+        let rec = q.quarantine(&victim, "EICAR.Test", "test", 3).unwrap();
+        let sha256 = rec.sha256.as_str();
 
         // Victim was unlinked
         assert!(!victim.exists());
@@ -386,10 +388,7 @@ mod tests {
 
         let victim = tmp.join("tamper.bin");
         std::fs::write(&victim, b"plain payload").unwrap();
-        let sha256 = "aabbccddeeff11223344556677889900aabbccddeeff11223344556677889900";
-        let rec = q
-            .quarantine(&victim, sha256, "Tamper.Test", "test", 2, 100)
-            .unwrap();
+        let rec = q.quarantine(&victim, "Tamper.Test", "test", 2).unwrap();
 
         let stored = tmp.join(&rec.stored_name);
         let mut blob = std::fs::read(&stored).unwrap();
@@ -398,7 +397,32 @@ mod tests {
         blob[last] ^= 0x42;
         std::fs::write(&stored, &blob).unwrap();
 
-        assert!(q.restore(sha256).is_err());
+        assert!(q.restore(&rec.sha256).is_err());
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn same_payload_at_two_paths_and_distinct_files_keep_separate_entries() {
+        let db = Database::open_in_memory().unwrap();
+        let tmp = std::env::temp_dir().join(format!("aegis-vault-dup-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let q = Quarantine::with_parts(&db, tmp.clone(), [3u8; 32]);
+
+        let (a, b, c) = (tmp.join("a.bin"), tmp.join("b.bin"), tmp.join("c.bin"));
+        std::fs::write(&a, b"same payload").unwrap();
+        std::fs::write(&b, b"same payload").unwrap();
+        std::fs::write(&c, b"other payload").unwrap();
+        let ids: Vec<String> = [&a, &b, &c]
+            .iter()
+            .map(|p| q.quarantine(p, "Dup.Test", "test", 2).unwrap().sha256)
+            .collect();
+
+        assert_eq!(q.list().unwrap().len(), 3);
+        for (id, p) in ids.iter().zip([&a, &b, &c]) {
+            assert_eq!(&q.restore(id).unwrap(), p);
+        }
+        assert_eq!(std::fs::read(&a).unwrap(), b"same payload");
+        assert_eq!(std::fs::read(&c).unwrap(), b"other payload");
         std::fs::remove_dir_all(&tmp).ok();
     }
 }

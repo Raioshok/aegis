@@ -32,6 +32,8 @@ fn main() {
             commands::kill_process,
             commands::inspect_process_memory,
             commands::security_audit,
+            commands::apply_hardening_fix,
+            commands::driver_audit,
             commands::sync_threat_feeds,
             commands::deploy_ransomware_honeypot,
             commands::get_protection_config,

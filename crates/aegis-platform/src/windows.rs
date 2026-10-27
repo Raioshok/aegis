@@ -3,7 +3,7 @@
 use crate::traits::*;
 use aegis_core::{
     AccessEvent, AccessEventType, AegisError, BlockSets, Connection, Detection, MapRegion,
-    ProcessEvent, ProcessEventKind, Result, SandboxPolicy, Severity, ThreatClass,
+    Result, SandboxPolicy, Severity, ThreatClass,
 };
 use std::ffi::OsString;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
@@ -228,6 +228,40 @@ impl ProcessControl for WindowsProcessControl {
             }
         }
     }
+
+    fn command_line(&self, pid: u32) -> Option<Vec<String>> {
+        // ProcessCommandLineInformation (60): a UNICODE_STRING header followed by its buffer.
+        const PROCESS_COMMAND_LINE_INFORMATION: i32 = 60;
+        unsafe {
+            let handle = windows_sys::Win32::System::Threading::OpenProcess(
+                windows_sys::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION,
+                0,
+                pid,
+            );
+            if handle.is_null() {
+                return None;
+            }
+            let mut buf = vec![0u64; 4096]; // 32 KiB, 8-byte aligned for the header
+            let mut needed = 0u32;
+            let status = windows_sys::Wdk::System::Threading::NtQueryInformationProcess(
+                handle,
+                PROCESS_COMMAND_LINE_INFORMATION,
+                buf.as_mut_ptr() as *mut std::ffi::c_void,
+                (buf.len() * 8) as u32,
+                &mut needed,
+            );
+            windows_sys::Win32::Foundation::CloseHandle(handle);
+            if status < 0 {
+                return None;
+            }
+            let us = &*(buf.as_ptr() as *const windows_sys::Win32::Foundation::UNICODE_STRING);
+            if us.Buffer.is_null() || us.Length == 0 {
+                return None;
+            }
+            let text = std::slice::from_raw_parts(us.Buffer, us.Length as usize / 2);
+            Some(vec![String::from_utf16_lossy(text)])
+        }
+    }
 }
 
 // --- Windows Memory Inspector -----------------------------------------
@@ -384,9 +418,9 @@ impl MemoryInspector for WindowsMemoryInspector {
 
                             loop {
                                 if te.th32OwnerProcessID == pid {
-                                    // THREAD_QUERY_INFORMATION (0x0040) | THREAD_GET_CONTEXT (0x0008)
+                                    // THREAD_QUERY_INFORMATION (0x0040) | THREAD_GET_CONTEXT (0x0008) | THREAD_SUSPEND_RESUME (0x0002)
                                     let h_thread = windows_sys::Win32::System::Threading::OpenThread(
-                                        0x0040 | 0x0008,
+                                        0x0040 | 0x0008 | 0x0002,
                                         0,
                                         te.th32ThreadID,
                                     );
@@ -433,6 +467,11 @@ impl MemoryInspector for WindowsMemoryInspector {
                                         }
                                         let mut ctx: CONTEXT64 = std::mem::zeroed();
                                         ctx.context_flags = 0x00100000 | 0x00000002; // CONTEXT_CONTROL
+                                        let current_tid = windows_sys::Win32::System::Threading::GetCurrentThreadId();
+                                        let is_self = te.th32ThreadID == current_tid;
+                                        if !is_self {
+                                            windows_sys::Win32::System::Threading::SuspendThread(h_thread);
+                                        }
                                         if GetThreadContext(h_thread, &mut ctx as *mut _ as _) != 0 {
                                             let rip = ctx.rip as usize;
                                             if rip > 0 && !unbacked.contains(&rip) {
@@ -445,6 +484,9 @@ impl MemoryInspector for WindowsMemoryInspector {
                                                     }
                                                 }
                                             }
+                                        }
+                                        if !is_self {
+                                            windows_sys::Win32::System::Threading::ResumeThread(h_thread);
                                         }
 
                                         windows_sys::Win32::Foundation::CloseHandle(h_thread);
@@ -495,8 +537,9 @@ impl MemoryInspector for WindowsMemoryInspector {
 
                             loop {
                                 if te.th32OwnerProcessID == pid {
+                                    // THREAD_QUERY_INFORMATION (0x0040) | THREAD_GET_CONTEXT (0x0008) | THREAD_SUSPEND_RESUME (0x0002)
                                     let h_thread = windows_sys::Win32::System::Threading::OpenThread(
-                                        0x0040 | 0x0008,
+                                        0x0040 | 0x0008 | 0x0002,
                                         0,
                                         te.th32ThreadID,
                                     );
@@ -504,11 +547,16 @@ impl MemoryInspector for WindowsMemoryInspector {
                                         let mut start_addr: usize = 0;
                                         let mut ret_len: u32 = 0;
                                         let mut is_start_unbacked = false;
+                                        let mut is_sleeping_beacon = false;
+                                        let mut is_indirect_syscall = false;
                                         if query_thread(h_thread, 9, &mut start_addr as *mut _ as _, std::mem::size_of::<usize>() as u32, &mut ret_len) == 0 && start_addr > 0 {
                                             for r in &regions {
                                                 if start_addr >= r.start && start_addr < r.end {
                                                     if r.is_private && r.is_executable {
                                                         is_start_unbacked = true;
+                                                    }
+                                                    if r.is_private && !r.is_executable {
+                                                        is_sleeping_beacon = true;
                                                     }
                                                     break;
                                                 }
@@ -541,21 +589,41 @@ impl MemoryInspector for WindowsMemoryInspector {
                                             rip: u64,
                                         }
                                         let mut ctx: CONTEXT64 = std::mem::zeroed();
-                                        ctx.context_flags = 0x00100000 | 0x00000002; // CONTEXT_CONTROL
+                                        // CONTEXT_CONTROL (0x100002) | CONTEXT_DEBUG_REGISTERS (0x100010)
+                                        ctx.context_flags = 0x00100000 | 0x00000002 | 0x00000010;
                                         let mut is_rip_unbacked = false;
+                                        let mut is_hardware_breakpoint = false;
+                                        let mut debug_regs = [0u64; 4];
                                         let mut rip: usize = 0;
+                                        let mut rsp: usize = 0;
+                                        let current_tid = windows_sys::Win32::System::Threading::GetCurrentThreadId();
+                                        let is_self = te.th32ThreadID == current_tid;
+                                        if !is_self {
+                                            windows_sys::Win32::System::Threading::SuspendThread(h_thread);
+                                        }
                                         if GetThreadContext(h_thread, &mut ctx as *mut _ as _) != 0 {
                                             rip = ctx.rip as usize;
+                                            rsp = ctx.rsp as usize;
+                                            debug_regs = [ctx.dr0, ctx.dr1, ctx.dr2, ctx.dr3];
+                                            if ctx.dr0 != 0 || ctx.dr1 != 0 || ctx.dr2 != 0 || ctx.dr3 != 0 {
+                                                is_hardware_breakpoint = true;
+                                            }
                                             if rip > 0 {
                                                 for r in &regions {
                                                     if rip >= r.start && rip < r.end {
                                                         if r.is_private && r.is_executable {
                                                             is_rip_unbacked = true;
                                                         }
+                                                        if r.is_private && !r.is_executable {
+                                                            is_sleeping_beacon = true;
+                                                        }
                                                         break;
                                                     }
                                                 }
                                             }
+                                        }
+                                        if !is_self {
+                                            windows_sys::Win32::System::Threading::ResumeThread(h_thread);
                                         }
 
                                         #[repr(C)]
@@ -601,11 +669,34 @@ impl MemoryInspector for WindowsMemoryInspector {
                                                         is_function_peekaboo = true;
                                                     }
                                                 }
+
+                                                // Indirect Syscall Check: if the return address on stack [RSP] is in unbacked private memory
+                                                if rsp > 0x10000 {
+                                                    let mut caller_ret = 0usize;
+                                                    let mut r_bread = 0usize;
+                                                    if windows_sys::Win32::System::Diagnostics::Debug::ReadProcessMemory(
+                                                        h_proc,
+                                                        rsp as *const std::ffi::c_void,
+                                                        &mut caller_ret as *mut _ as _,
+                                                        std::mem::size_of::<usize>(),
+                                                        &mut r_bread,
+                                                    ) != 0 && r_bread == std::mem::size_of::<usize>() && caller_ret > 0x10000 {
+                                                        for r in &regions {
+                                                            if caller_ret >= r.start && caller_ret < r.end {
+                                                                if r.is_private && r.is_executable {
+                                                                    is_indirect_syscall = true;
+                                                                }
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
                                                 windows_sys::Win32::Foundation::CloseHandle(h_proc);
                                             }
                                         }
 
-                                        if is_start_unbacked || is_rip_unbacked || is_function_peekaboo {
+                                        if is_start_unbacked || is_rip_unbacked || is_function_peekaboo || is_hardware_breakpoint || is_sleeping_beacon || is_indirect_syscall {
                                             anomalies.push(ThreadAnomaly {
                                                 tid: te.th32ThreadID,
                                                 pid,
@@ -615,6 +706,10 @@ impl MemoryInspector for WindowsMemoryInspector {
                                                 is_start_unbacked,
                                                 teb_user_reserved,
                                                 is_function_peekaboo,
+                                                is_hardware_breakpoint,
+                                                is_sleeping_beacon,
+                                                is_indirect_syscall,
+                                                debug_registers: debug_regs,
                                             });
                                         }
 
@@ -919,7 +1014,7 @@ impl IntegrityChecks for WindowsIntegrityChecks {
                                 .trim_matches('\0')
                                 .to_string();
                             findings.push(Detection::new(
-                                "Integrity",
+                                "Rootkit",
                                 format!("Persistence.IFEOHijack:{victim}"),
                                 Severity::Critical,
                                 ThreatClass::Persistence,
@@ -959,7 +1054,7 @@ impl IntegrityChecks for WindowsIntegrityChecks {
                     && dword_val == 1
                 {
                     findings.push(Detection::new(
-                        "Integrity",
+                        "Rootkit",
                         "Tampering.DefenderDisabled",
                         Severity::High,
                         ThreatClass::Behavioral,
@@ -1000,7 +1095,7 @@ impl IntegrityChecks for WindowsIntegrityChecks {
                         .to_string();
                     if !app_init.is_empty() {
                         findings.push(Detection::new(
-                            "Integrity",
+                            "Rootkit",
                             "Persistence.AppInitDLLs",
                             Severity::High,
                             ThreatClass::Persistence,
@@ -1009,6 +1104,212 @@ impl IntegrityChecks for WindowsIntegrityChecks {
                     }
                 }
                 windows_sys::Win32::System::Registry::RegCloseKey(hkey);
+            }
+        }
+
+        // 4. Winlogon Hijacking Check (Userinit and Shell persistence)
+        unsafe {
+            let subkey = b"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon\0";
+            let mut hkey: windows_sys::Win32::System::Registry::HKEY = std::ptr::null_mut();
+            if windows_sys::Win32::System::Registry::RegOpenKeyExA(
+                windows_sys::Win32::System::Registry::HKEY_LOCAL_MACHINE,
+                subkey.as_ptr(),
+                0,
+                windows_sys::Win32::System::Registry::KEY_READ,
+                &mut hkey,
+            ) == 0
+            {
+                let mut val_type: u32 = 0;
+                let mut val_buf = [0u8; 512];
+                let mut val_len = val_buf.len() as u32;
+                if windows_sys::Win32::System::Registry::RegQueryValueExA(
+                    hkey,
+                    b"Userinit\0".as_ptr(),
+                    std::ptr::null_mut(),
+                    &mut val_type,
+                    val_buf.as_mut_ptr(),
+                    &mut val_len,
+                ) == 0
+                {
+                    let userinit = String::from_utf8_lossy(&val_buf[..val_len as usize])
+                        .trim_matches('\0')
+                        .trim()
+                        .to_ascii_lowercase();
+                    if !userinit.is_empty() && !userinit.starts_with("c:\\windows\\system32\\userinit.exe") {
+                        findings.push(Detection::new(
+                            "Rootkit",
+                            "Persistence.Winlogon.Userinit",
+                            Severity::Critical,
+                            ThreatClass::Persistence,
+                            format!("Winlogon Userinit binary modified: '{userinit}' (standard is 'userinit.exe')"),
+                        ));
+                    }
+                }
+
+                val_len = val_buf.len() as u32;
+                if windows_sys::Win32::System::Registry::RegQueryValueExA(
+                    hkey,
+                    b"Shell\0".as_ptr(),
+                    std::ptr::null_mut(),
+                    &mut val_type,
+                    val_buf.as_mut_ptr(),
+                    &mut val_len,
+                ) == 0
+                {
+                    let shell = String::from_utf8_lossy(&val_buf[..val_len as usize])
+                        .trim_matches('\0')
+                        .trim()
+                        .to_ascii_lowercase();
+                    if !shell.is_empty() && shell != "explorer.exe" {
+                        findings.push(Detection::new(
+                            "Rootkit",
+                            "Persistence.Winlogon.Shell",
+                            Severity::Critical,
+                            ThreatClass::Persistence,
+                            format!("Winlogon Shell hijacked: '{shell}' (standard is 'explorer.exe')"),
+                        ));
+                    }
+                }
+                windows_sys::Win32::System::Registry::RegCloseKey(hkey);
+            }
+        }
+
+        // 5. LSA Security Packages Persistence Check
+        unsafe {
+            let subkey = b"SYSTEM\\CurrentControlSet\\Control\\Lsa\0";
+            let mut hkey: windows_sys::Win32::System::Registry::HKEY = std::ptr::null_mut();
+            if windows_sys::Win32::System::Registry::RegOpenKeyExA(
+                windows_sys::Win32::System::Registry::HKEY_LOCAL_MACHINE,
+                subkey.as_ptr(),
+                0,
+                windows_sys::Win32::System::Registry::KEY_READ,
+                &mut hkey,
+            ) == 0
+            {
+                let mut val_type: u32 = 0;
+                let mut val_buf = [0u8; 1024];
+                let mut val_len = val_buf.len() as u32;
+                if windows_sys::Win32::System::Registry::RegQueryValueExA(
+                    hkey,
+                    b"Security Packages\0".as_ptr(),
+                    std::ptr::null_mut(),
+                    &mut val_type,
+                    val_buf.as_mut_ptr(),
+                    &mut val_len,
+                ) == 0
+                {
+                    let pkgs = String::from_utf8_lossy(&val_buf[..val_len as usize]);
+                    for token in pkgs.split('\0') {
+                        let t = token.trim().to_ascii_lowercase();
+                        if !t.is_empty() && !matches!(t.as_str(), "kerberos" | "msv1_0" | "schannel" | "wdigest" | "tspkg" | "pku2u" | "cloudap") {
+                            findings.push(Detection::new(
+                                "Rootkit",
+                                format!("Persistence.LsaSecurityPackage:{t}"),
+                                Severity::Critical,
+                                ThreatClass::Persistence,
+                                format!("Non-standard LSA Security Package registered: '{t}' (potential SSP injection / credential theft)"),
+                            ));
+                        }
+                    }
+                }
+                windows_sys::Win32::System::Registry::RegCloseKey(hkey);
+            }
+        }
+
+        // 6. SafeBoot / Safe Mode Persistence Check
+        unsafe {
+            for mode in ["Minimal", "Network"] {
+                let subkey = format!("SYSTEM\\CurrentControlSet\\Control\\SafeBoot\\{mode}\0");
+                let mut hkey: windows_sys::Win32::System::Registry::HKEY = std::ptr::null_mut();
+                if windows_sys::Win32::System::Registry::RegOpenKeyExA(
+                    windows_sys::Win32::System::Registry::HKEY_LOCAL_MACHINE,
+                    subkey.as_ptr(),
+                    0,
+                    windows_sys::Win32::System::Registry::KEY_READ,
+                    &mut hkey,
+                ) == 0
+                {
+                    for suspect in ["vss", "swprv", "aegis_fake", "blackcat", "medusa"] {
+                        let suspect_cstr = format!("{suspect}\0");
+                        let mut suspect_k: windows_sys::Win32::System::Registry::HKEY = std::ptr::null_mut();
+                        if windows_sys::Win32::System::Registry::RegOpenKeyExA(
+                            hkey,
+                            suspect_cstr.as_ptr(),
+                            0,
+                            windows_sys::Win32::System::Registry::KEY_READ,
+                            &mut suspect_k,
+                        ) == 0
+                        {
+                            findings.push(Detection::new(
+                                "Rootkit",
+                                format!("Persistence.SafeBoot:{mode}:{suspect}"),
+                                Severity::High,
+                                ThreatClass::Persistence,
+                                format!("Suspicious SafeBoot {mode} service registered: '{suspect}' (SafeMode ransomware bypass)"),
+                            ));
+                            windows_sys::Win32::System::Registry::RegCloseKey(suspect_k);
+                        }
+                    }
+                    windows_sys::Win32::System::Registry::RegCloseKey(hkey);
+                }
+            }
+        }
+
+        // 7. Accessibility Tools Physical File Tampering (sethc.exe, utilman.exe, osk.exe)
+        for victim in ["sethc.exe", "utilman.exe", "osk.exe", "Magnify.exe"] {
+            let victim_path = format!("C:\\Windows\\System32\\{victim}");
+            if let Ok(meta) = std::fs::metadata(&victim_path) {
+                if meta.len() == 0 {
+                    findings.push(Detection::new(
+                        "Rootkit",
+                        format!("Tampering.AccessibilityZeroByte:{victim}"),
+                        Severity::High,
+                        ThreatClass::Rootkit,
+                        format!("Accessibility binary at {victim_path} is 0 bytes (disabled/tampered)"),
+                    ));
+                }
+            }
+        }
+
+        // 8. Cross-View Process Enumeration (DKOM Hidden Process Hunter)
+        let mut listed_pids = std::collections::HashSet::new();
+        unsafe {
+            let snap = windows_sys::Win32::System::Diagnostics::ToolHelp::CreateToolhelp32Snapshot(
+                windows_sys::Win32::System::Diagnostics::ToolHelp::TH32CS_SNAPPROCESS,
+                0,
+            );
+            if snap != windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE && !snap.is_null() {
+                let mut pe: windows_sys::Win32::System::Diagnostics::ToolHelp::PROCESSENTRY32W = std::mem::zeroed();
+                pe.dwSize = std::mem::size_of::<windows_sys::Win32::System::Diagnostics::ToolHelp::PROCESSENTRY32W>() as u32;
+                if windows_sys::Win32::System::Diagnostics::ToolHelp::Process32FirstW(snap, &mut pe) != 0 {
+                    loop {
+                        listed_pids.insert(pe.th32ProcessID);
+                        if windows_sys::Win32::System::Diagnostics::ToolHelp::Process32NextW(snap, &mut pe) == 0 {
+                            break;
+                        }
+                    }
+                }
+                windows_sys::Win32::Foundation::CloseHandle(snap);
+            }
+
+            for probe_pid in (8..=1024).step_by(4) {
+                if !listed_pids.contains(&probe_pid) {
+                    let h_probe = windows_sys::Win32::System::Threading::OpenProcess(
+                        windows_sys::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION,
+                        0,
+                        probe_pid,
+                    );
+                    if !h_probe.is_null() && h_probe != windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+                        findings.push(Detection::new(
+                            "Rootkit",
+                            format!("Hidden.Process.DKOM:{probe_pid}"),
+                            Severity::Critical,
+                            ThreatClass::Rootkit,
+                            format!("PID {probe_pid} opened successfully but omitted from ToolHelp process snapshot (Direct Kernel Object Manipulation / DKOM)"),
+                        ));
+                        windows_sys::Win32::Foundation::CloseHandle(h_probe);
+                    }
+                }
             }
         }
 
@@ -1309,8 +1610,7 @@ pub fn dpapi_unprotect(ciphertext: &[u8]) -> std::io::Result<Vec<u8>> {
 
 impl SecretStore for WindowsSecretStore {
     fn load_or_create_vault_key(&self) -> Result<Zeroizing<[u8; 32]>> {
-        let paths = WindowsPaths::new();
-        let key_path = paths.data_dir().join("quarantine.key");
+        let key_path = aegis_core::paths::keyring_file();
         if key_path.exists() {
             let bytes = std::fs::read(&key_path).map_err(|e| AegisError::io(&key_path, e))?;
             if let Ok(unprotected) = dpapi_unprotect(&bytes) {
@@ -1355,9 +1655,7 @@ impl FileEventSource for WindowsFileEventSource {
         for root in roots {
             let r = root.clone();
             let tx_clone = tx.clone();
-            std::thread::spawn(move || {
-                let _ = watch_directory(&r, tx_clone);
-            });
+            std::thread::spawn(move || watch_directory_forever(&r, tx_clone));
         }
         Ok(Box::new(WindowsEventStream { rx }))
     }
@@ -1377,92 +1675,158 @@ impl EventStream for WindowsEventStream {
     }
 }
 
-fn watch_directory(dir: &Path, tx: mpsc::Sender<AccessEvent>) -> Result<()> {
+/// Keep a root watched for the life of the process: reopen after errors and,
+/// after any gap in coverage, rescan files changed since the last good read.
+fn watch_directory_forever(dir: &Path, tx: mpsc::Sender<AccessEvent>) {
+    let mut since = std::time::SystemTime::now();
+    loop {
+        match watch_directory(dir, &tx, &mut since) {
+            WatchEnd::ReceiverGone => return,
+            WatchEnd::Failed(e) => {
+                tracing::warn!(path = %dir.display(), error = %e, "directory watch failed; reopening");
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+        }
+        if !emit_changed_since(dir, since, &tx) {
+            return;
+        }
+    }
+}
+
+enum WatchEnd {
+    ReceiverGone,
+    Failed(String),
+}
+
+/// Emit an event for every file under `dir` modified at or after `since`.
+/// Returns false when the receiver is gone.
+fn emit_changed_since(dir: &Path, since: std::time::SystemTime, tx: &mpsc::Sender<AccessEvent>) -> bool {
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else { continue };
+        for entry in entries.flatten() {
+            let Ok(meta) = entry.metadata() else { continue };
+            if meta.is_dir() {
+                stack.push(entry.path());
+            } else if meta.modified().map(|m| m >= since).unwrap_or(true) {
+                let ev = AccessEvent {
+                    path: entry.path(),
+                    pid: 0,
+                    event_type: AccessEventType::CloseWrite,
+                    file_id: None,
+                };
+                if tx.send(ev).is_err() {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+fn watch_directory(dir: &Path, tx: &mpsc::Sender<AccessEvent>, since: &mut std::time::SystemTime) -> WatchEnd {
+    use windows_sys::Win32::Storage::FileSystem as fs;
     unsafe {
         let dir_w: Vec<u16> = dir.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
-        let handle = windows_sys::Win32::Storage::FileSystem::CreateFileW(
+        let handle = fs::CreateFileW(
             dir_w.as_ptr(),
-            windows_sys::Win32::Storage::FileSystem::FILE_LIST_DIRECTORY,
-            windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ
-                | windows_sys::Win32::Storage::FileSystem::FILE_SHARE_WRITE
-                | windows_sys::Win32::Storage::FileSystem::FILE_SHARE_DELETE,
+            fs::FILE_LIST_DIRECTORY,
+            fs::FILE_SHARE_READ | fs::FILE_SHARE_WRITE | fs::FILE_SHARE_DELETE,
             std::ptr::null(),
-            windows_sys::Win32::Storage::FileSystem::OPEN_EXISTING,
-            windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS,
+            fs::OPEN_EXISTING,
+            fs::FILE_FLAG_BACKUP_SEMANTICS,
             std::ptr::null_mut(),
         );
-
-        if handle.is_null()
-            || handle == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE
-        {
-            return Err(AegisError::io(dir, std::io::Error::last_os_error()));
+        if handle.is_null() || handle == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+            return WatchEnd::Failed(std::io::Error::last_os_error().to_string());
         }
 
-        let mut buffer = [0u8; 64 * 1024];
+        // The API requires a DWORD-aligned buffer, so back it with u32s.
+        let mut buffer = vec![0u32; 16 * 1024];
+        let buf_bytes = (buffer.len() * 4) as u32;
         let mut bytes_returned: u32 = 0;
 
-        loop {
-            let success = windows_sys::Win32::Storage::FileSystem::ReadDirectoryChangesW(
+        let end = 'watch: loop {
+            let read_started = std::time::SystemTime::now();
+            let ok = fs::ReadDirectoryChangesW(
                 handle,
                 buffer.as_mut_ptr() as *mut std::ffi::c_void,
-                buffer.len() as u32,
+                buf_bytes,
                 1, // watch subtree
-                windows_sys::Win32::Storage::FileSystem::FILE_NOTIFY_CHANGE_FILE_NAME
-                    | windows_sys::Win32::Storage::FileSystem::FILE_NOTIFY_CHANGE_LAST_WRITE,
+                fs::FILE_NOTIFY_CHANGE_FILE_NAME
+                    | fs::FILE_NOTIFY_CHANGE_DIR_NAME
+                    | fs::FILE_NOTIFY_CHANGE_LAST_WRITE,
                 &mut bytes_returned,
                 std::ptr::null_mut(),
                 None,
             );
-
-            if success == 0 {
-                // Buffer overflow or failure -> re-enumerate
-                tracing::warn!("ReadDirectoryChangesW returned overflow/error, re-enumerating...");
-                break;
+            if ok == 0 {
+                break WatchEnd::Failed(std::io::Error::last_os_error().to_string());
             }
-
             if bytes_returned == 0 {
+                // Kernel buffer overflowed: events were dropped, catch up by rescanning.
+                tracing::warn!(path = %dir.display(), "change buffer overflow; rescanning");
+                if !emit_changed_since(dir, *since, tx) {
+                    break WatchEnd::ReceiverGone;
+                }
+                *since = read_started;
                 continue;
             }
 
+            let bytes = std::slice::from_raw_parts(buffer.as_ptr() as *const u8, bytes_returned as usize);
             let mut offset = 0usize;
-            while offset < bytes_returned as usize {
-                #[repr(C)]
-                struct FILE_NOTIFY_INFORMATION {
-                    next_entry_offset: u32,
-                    action: u32,
-                    file_name_length: u32,
-                }
-                let info = &*(buffer[offset..].as_ptr() as *const FILE_NOTIFY_INFORMATION);
-                let name_len = (info.file_name_length / 2) as usize;
-                let name_ptr = buffer[offset + std::mem::size_of::<FILE_NOTIFY_INFORMATION>()..].as_ptr() as *const u16;
-                let name_slice = std::slice::from_raw_parts(name_ptr, name_len);
-                let file_name = OsString::from_wide(name_slice);
-                let full_path = dir.join(file_name);
+            loop {
+                let field = |at: usize| u32::from_le_bytes(bytes[offset + at..offset + at + 4].try_into().unwrap());
+                let (next, action, name_len) = (field(0) as usize, field(4), field(8) as usize);
+                let name_bytes = &bytes[offset + 12..offset + 12 + name_len];
+                let wide: Vec<u16> = name_bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+                let full_path = dir.join(OsString::from_wide(&wide));
 
-                let ev_type = match info.action {
-                    1 => AccessEventType::CloseWrite, // Added
-                    2 => AccessEventType::Modify,     // Removed
-                    3 => AccessEventType::Modify,     // Modified
-                    4 | 5 => AccessEventType::Rename,
-                    _ => AccessEventType::Modify,
+                // 1 added, 3 modified, 5 renamed (new name). 2 removed / 4 old name have nothing to scan.
+                let ev_type = match action {
+                    1 => Some(AccessEventType::CloseWrite),
+                    3 => Some(AccessEventType::Modify),
+                    5 => Some(AccessEventType::Rename),
+                    _ => None,
                 };
-
-                let _ = tx.send(AccessEvent {
-                    path: full_path,
-                    pid: 0,
-                    event_type: ev_type,
-                    file_id: None,
-                });
-
-                if info.next_entry_offset == 0 {
+                if let Some(event_type) = ev_type {
+                    if full_path.is_dir() {
+                        // A folder moved or copied in: its existing files never raise their own events.
+                        if !emit_changed_since(&full_path, std::time::UNIX_EPOCH, tx) {
+                            break 'watch WatchEnd::ReceiverGone;
+                        }
+                    } else {
+                        let ev = AccessEvent { path: full_path, pid: 0, event_type, file_id: None };
+                        if tx.send(ev).is_err() {
+                            break 'watch WatchEnd::ReceiverGone;
+                        }
+                    }
+                }
+                if next == 0 {
                     break;
                 }
-                offset += info.next_entry_offset as usize;
+                offset += next;
             }
-        }
+            *since = read_started;
+        };
 
         windows_sys::Win32::Foundation::CloseHandle(handle);
-        Ok(())
+        end
+    }
+}
+
+/// Address of `dll!func` in this process. System DLLs share one base address
+/// across processes for a boot session, so it is valid in other processes too.
+pub fn security_api_address(dll: &str, func: &str) -> Option<usize> {
+    use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
+    let dll_c = std::ffi::CString::new(dll).ok()?;
+    let func_c = std::ffi::CString::new(func).ok()?;
+    unsafe {
+        let module = LoadLibraryA(dll_c.as_ptr() as *const u8);
+        if module.is_null() {
+            return None;
+        }
+        GetProcAddress(module, func_c.as_ptr() as *const u8).map(|f| f as usize)
     }
 }
 
@@ -1635,87 +1999,6 @@ impl AutoStart for WindowsAutoStart {
         }
 
         Ok(())
-    }
-}
-
-// --- Windows Process Event Source (ToolHelp / Process Creation) --------
-
-pub struct WindowsProcessEventSource;
-
-impl WindowsProcessEventSource {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-pub struct WindowsProcStream {
-    rx: mpsc::Receiver<ProcessEvent>,
-}
-
-impl ProcStream for WindowsProcStream {
-    fn next_event(&mut self) -> Option<ProcessEvent> {
-        self.rx.recv().ok()
-    }
-}
-
-impl ProcessEventSource for WindowsProcessEventSource {
-    fn start(&self) -> Result<Box<dyn ProcStream>> {
-        let (tx, rx) = mpsc::channel();
-        std::thread::Builder::new()
-            .name("aegis-proc-telemetry".into())
-            .spawn(move || {
-                let mut known_pids = std::collections::HashSet::new();
-                let ctrl = WindowsProcessControl::new();
-
-                loop {
-                    unsafe {
-                        let snap = windows_sys::Win32::System::Diagnostics::ToolHelp::CreateToolhelp32Snapshot(
-                            windows_sys::Win32::System::Diagnostics::ToolHelp::TH32CS_SNAPPROCESS,
-                            0,
-                        );
-                        if snap != windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE && !snap.is_null() {
-                            let mut entry: windows_sys::Win32::System::Diagnostics::ToolHelp::PROCESSENTRY32W = std::mem::zeroed();
-                            entry.dwSize = std::mem::size_of::<windows_sys::Win32::System::Diagnostics::ToolHelp::PROCESSENTRY32W>() as u32;
-
-                            if windows_sys::Win32::System::Diagnostics::ToolHelp::Process32FirstW(snap, &mut entry) != 0 {
-                                loop {
-                                    let pid = entry.th32ProcessID;
-                                    let ppid = entry.th32ParentProcessID;
-                                    if !known_pids.contains(&pid) {
-                                        known_pids.insert(pid);
-                                        let img = ctrl.image_path(pid).unwrap_or_else(|| {
-                                            let name_slice = &entry.szExeFile[..];
-                                            let len = name_slice.iter().position(|&c| c == 0).unwrap_or(name_slice.len());
-                                            PathBuf::from(OsString::from_wide(&name_slice[..len]))
-                                        });
-
-                                        let ev = ProcessEvent {
-                                            pid,
-                                            ppid,
-                                            exe: img.clone(),
-                                            cmdline: vec![img.to_string_lossy().into_owned()],
-                                            kind: ProcessEventKind::Exec,
-                                            timestamp_ms: aegis_core::now_epoch() as u64 * 1000,
-                                        };
-                                        if tx.send(ev).is_err() {
-                                            windows_sys::Win32::Foundation::CloseHandle(snap);
-                                            return;
-                                        }
-                                    }
-                                    if windows_sys::Win32::System::Diagnostics::ToolHelp::Process32NextW(snap, &mut entry) == 0 {
-                                        break;
-                                    }
-                                }
-                            }
-                            windows_sys::Win32::Foundation::CloseHandle(snap);
-                        }
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                }
-            })
-            .map_err(|e| AegisError::io(Path::new("proc_telemetry"), e))?;
-
-        Ok(Box::new(WindowsProcStream { rx }))
     }
 }
 
@@ -1905,6 +2188,11 @@ static VULNERABLE_DRIVERS: &[(&str, &str, Option<&str>, &str, &str)] = &[
     ("zam64.sys", "e402929da6e11893c5c64c7e63b65fa3a4d493a743b171fcb63b2ad8708cb7bb", None, "Zemana Ltd.", "Zemana driver abused to unregister process callbacks and terminate EDRs"),
     ("kprocesshacker.sys", "38ff1cf1cf3ef8f9361ad85f403932e60475fb1737be00780486c9944dffaa75", None, "Process Hacker", "KProcessHacker driver exposing full kernel process manipulation"),
     ("echo.sys", "a3399611db84ad5215f7b4ee79ab0e19488a44ec2572b83491f24d73aa7fc2d0", None, "Echo / Anti-Cheat", "Vulnerable gaming driver abused for BYOVD kernel tampering"),
+    ("atsdio64.sys", "d718b5de39a66d03d3cbebc1b292c3a5099d0eec956276ccad27e857dd58f913", Some("CVE-2020-15368"), "ASUSTeK Computer Inc.", "ASUS ASUSTeK arbitrary physical memory mapping"),
+    ("eneio64.sys", "9be432da34f19b22a00c2830f3a611593847f9754f2cc1631eb62817ba2a6d48", Some("CVE-2020-12446"), "ENE TECHNOLOGY INC.", "ENE RGB controller driver arbitrary physical RW"),
+    ("amifldrv64.sys", "7b0e2714c7c8c3c1db173b22b64ab5ee5168ddc0fb6e594b281f6a15714e8e83", None, "American Megatrends Inc.", "AMI firmware flash driver arbitrary physical memory RW"),
+    ("dbk64.sys", "e4e3b2e7a374b8fbce4e6b266bc332612a20a4b08722c159048a1c3d1911fa89", None, "Cheat Engine", "Cheat Engine kernel driver exposing arbitrary process memory RW"),
+    ("virscan64.sys", "63e14187f65a127a514d3c9f52f36f8a84617dfbcf6a1b212f49514757c2bc3c", None, "TG Soft", "TG Soft driver abused by ransomware to disable EDR processes"),
 ];
 
 #[derive(Debug, Default)]
@@ -1916,10 +2204,95 @@ impl WindowsPlatformSecurity {
     }
 }
 
+/// LOLDrivers feed written by the threat-feed sync: `sha256 filename` per line.
+fn loldrivers_feed() -> std::collections::HashMap<String, String> {
+    let path = aegis_core::paths::threat_intel_dir().join("loldrivers.txt");
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| {
+            let mut it = l.split_whitespace();
+            let h = it.next()?.to_ascii_lowercase();
+            (h.len() == 64).then(|| (h, it.next().unwrap_or("driver.sys").to_string()))
+        })
+        .collect()
+}
+
+/// Number of distinct vulnerable-driver hashes known (built-in + LOLDrivers feed).
+pub fn vulnerable_driver_count() -> usize {
+    let mut all: std::collections::HashSet<String> = loldrivers_feed().into_keys().collect();
+    all.extend(VULNERABLE_DRIVERS.iter().map(|d| d.1.to_string()));
+    all.len()
+}
+
+/// Kernel and file-system driver services registered under HKLM\SYSTEM\CurrentControlSet\Services,
+/// as (service name, resolved image path).
+fn registered_kernel_drivers() -> Vec<(String, PathBuf)> {
+    use windows_sys::Win32::System::Registry::*;
+    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+    let mut out = Vec::new();
+    unsafe {
+        let mut services = std::ptr::null_mut();
+        let root = wide(r"SYSTEM\CurrentControlSet\Services");
+        if RegOpenKeyExW(HKEY_LOCAL_MACHINE, root.as_ptr(), 0, KEY_READ, &mut services) != 0 {
+            return out;
+        }
+        let mut index = 0u32;
+        loop {
+            let mut name = [0u16; 256];
+            let mut name_len = name.len() as u32;
+            let rc = RegEnumKeyExW(services, index, name.as_mut_ptr(), &mut name_len, std::ptr::null(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
+            if rc != 0 {
+                break;
+            }
+            index += 1;
+            let svc = String::from_utf16_lossy(&name[..name_len as usize]);
+            let svc_w = wide(&svc);
+
+            let mut ty = 0u32;
+            let mut ty_len = 4u32;
+            if RegGetValueW(services, svc_w.as_ptr(), wide("Type").as_ptr(), RRF_RT_REG_DWORD, std::ptr::null_mut(), &mut ty as *mut u32 as *mut _, &mut ty_len) != 0
+                || !(ty == 1 || ty == 2)
+            {
+                continue; // not SERVICE_KERNEL_DRIVER / SERVICE_FILE_SYSTEM_DRIVER
+            }
+
+            let mut buf = [0u16; 1024];
+            let mut len = (buf.len() * 2) as u32;
+            let image = if RegGetValueW(services, svc_w.as_ptr(), wide("ImagePath").as_ptr(), RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ, std::ptr::null_mut(), buf.as_mut_ptr() as *mut _, &mut len) == 0 {
+                let raw = String::from_utf16_lossy(&buf[..(len as usize / 2).saturating_sub(1)]);
+                resolve_driver_path(&raw, &system_root)
+            } else {
+                PathBuf::from(&system_root).join(r"System32\drivers").join(format!("{svc}.sys"))
+            };
+            out.push((svc, image));
+        }
+        RegCloseKey(services);
+    }
+    out
+}
+
+/// Turn a service ImagePath (`\SystemRoot\...`, `\??\C:\...`, `System32\...`) into a file path.
+fn resolve_driver_path(raw: &str, system_root: &str) -> PathBuf {
+    let raw = raw.trim().trim_matches('"');
+    let lower = raw.to_ascii_lowercase();
+    if let Some(rest) = raw.strip_prefix(r"\??\") {
+        PathBuf::from(rest)
+    } else if lower.starts_with(r"\systemroot\") {
+        PathBuf::from(system_root).join(&raw[r"\SystemRoot\".len()..])
+    } else if lower.starts_with(r"%systemroot%\") {
+        PathBuf::from(system_root).join(&raw[r"%SystemRoot%\".len()..])
+    } else if raw.len() > 1 && raw.as_bytes()[1] == b':' {
+        PathBuf::from(raw)
+    } else {
+        PathBuf::from(system_root).join(raw)
+    }
+}
+
 impl PlatformSecurity for WindowsPlatformSecurity {
     fn is_driver_hash_blocked(&self, sha256_hex: &str) -> bool {
-        let needle = sha256_hex.to_ascii_lowercase();
-        VULNERABLE_DRIVERS.iter().any(|(_, h, _, _, _)| *h == needle)
+        self.get_vulnerable_driver_info(sha256_hex).is_some()
     }
 
     fn get_vulnerable_driver_info(&self, sha256_hex: &str) -> Option<VulnerableDriverInfo> {
@@ -1930,6 +2303,33 @@ impl PlatformSecurity for WindowsPlatformSecurity {
             .map(|(name, sha, cve, vendor, desc)| {
                 VulnerableDriverInfo::new(*name, *sha, *cve, *vendor, *desc)
             })
+            .or_else(|| {
+                let name = loldrivers_feed().remove(&needle)?;
+                Some(VulnerableDriverInfo::new(name, needle.clone(), None::<String>, "unknown", "Listed in the LOLDrivers vulnerable driver database"))
+            })
+    }
+
+    fn audit_registered_drivers(&self) -> Vec<Detection> {
+        let mut known: std::collections::HashMap<String, String> = loldrivers_feed();
+        for d in VULNERABLE_DRIVERS {
+            known.insert(d.1.to_string(), format!("{} ({})", d.0, d.4));
+        }
+        let mut found = Vec::new();
+        for (svc, path) in registered_kernel_drivers() {
+            let Ok(bytes) = std::fs::read(&path) else { continue };
+            use sha2::{Digest, Sha256};
+            let hash = format!("{:x}", Sha256::digest(&bytes));
+            if let Some(what) = known.get(&hash) {
+                found.push(Detection::new(
+                    "DriverAudit",
+                    format!("VulnerableDriver.{svc}"),
+                    Severity::Critical,
+                    ThreatClass::Rootkit,
+                    format!("{} is a known vulnerable driver: {what}", path.display()),
+                ));
+            }
+        }
+        found
     }
 
     fn audit_driver_file(&self, path: &Path) -> Result<DriverAuditVerdict> {
@@ -1964,6 +2364,21 @@ impl PlatformSecurity for WindowsPlatformSecurity {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolves_service_image_paths() {
+        let root = r"C:\Windows";
+        assert_eq!(resolve_driver_path(r"\SystemRoot\System32\drivers\a.sys", root), PathBuf::from(r"C:\Windows\System32\drivers\a.sys"));
+        assert_eq!(resolve_driver_path(r"\??\D:\x\b.sys", root), PathBuf::from(r"D:\x\b.sys"));
+        assert_eq!(resolve_driver_path(r"System32\drivers\c.sys", root), PathBuf::from(r"C:\Windows\System32\drivers\c.sys"));
+        assert_eq!(resolve_driver_path(r#""C:\y\d.sys""#, root), PathBuf::from(r"C:\y\d.sys"));
+    }
+
+    #[test]
+    fn enumerates_real_kernel_drivers() {
+        let drivers = registered_kernel_drivers();
+        assert!(drivers.iter().any(|(_, p)| p.exists()), "expected at least one driver file on disk");
+    }
 
     #[test]
     fn test_autostart_query() {

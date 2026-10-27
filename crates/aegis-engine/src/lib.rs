@@ -83,11 +83,9 @@ pub fn default_engines(
 
     if config.engines.hash {
         let threat_intel_file = aegis_core::paths::threat_intel_dir().join("hashes.txt");
-        let hash_engine = if threat_intel_file.exists() {
-            HashEngine::from_file(&threat_intel_file)
-        } else {
-            HashEngine::with_builtin()
-        };
+        let mut hash_engine = HashEngine::from_file(&threat_intel_file);
+        // Synced feeds (MalwareBazaar etc.) live next to hashes.txt.
+        hash_engine.extend(FeedManager::new(aegis_core::paths::threat_intel_dir()).load_all().hashes);
         engines.push(Box::new(hash_engine));
     }
     if config.engines.yara {
