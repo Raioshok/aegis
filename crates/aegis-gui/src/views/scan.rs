@@ -1,5 +1,4 @@
-use std::path::PathBuf;
-use eframe::egui::{self, Color32, RichText, Vec2};
+use eframe::egui::{self, Color32, RichText};
 use crate::app::AegisApp;
 use crate::theme::*;
 
@@ -9,7 +8,7 @@ impl AegisApp {
             // Scan Controls Header
             egui::Frame::none()
                 .fill(CARD_BG)
-                .stroke(egui::Stroke::new(1.0, BORDER_COLOR))
+                .stroke(egui::Stroke::new(1.0_f32, BORDER_COLOR))
                 .rounding(egui::Rounding::same(8.0))
                 .inner_margin(egui::Margin::symmetric(20.0, 16.0))
                 .show(ui, |ui| {
@@ -90,7 +89,7 @@ impl AegisApp {
             if self.scan_findings.is_empty() {
                 egui::Frame::none()
                     .fill(CARD_BG)
-                    .stroke(egui::Stroke::new(1.0, BORDER_COLOR))
+                    .stroke(egui::Stroke::new(1.0_f32, BORDER_COLOR))
                     .rounding(egui::Rounding::same(6.0))
                     .inner_margin(egui::Margin::symmetric(16.0, 24.0))
                     .show(ui, |ui| {
@@ -105,10 +104,10 @@ impl AegisApp {
             } else {
                 let mut quarantine_req = None;
 
-                for (idx, (path_str, det)) in self.scan_findings.iter().enumerate() {
+                for (_idx, (path_str, det)) in self.scan_findings.iter().enumerate() {
                     egui::Frame::none()
                         .fill(CARD_BG)
-                        .stroke(egui::Stroke::new(1.0, BORDER_COLOR))
+                        .stroke(egui::Stroke::new(1.0_f32, BORDER_COLOR))
                         .rounding(egui::Rounding::same(6.0))
                         .inner_margin(egui::Margin::symmetric(16.0, 12.0))
                         .show(ui, |ui| {

@@ -96,14 +96,20 @@ impl ApkScanner {
         }
 
         // Correlate banking trojan permissions combo:
-        // Accessibility + Overlay + SMS = Definite Banking Trojan
+        // Accessibility + Overlay + SMS / QueryAllPackages = Definite Banking Trojan
         let has_accessibility = all_perms.iter().any(|p| p.contains("ACCESSIBILITY"));
         let has_overlay = all_perms.iter().any(|p| p.contains("SYSTEM_ALERT_WINDOW"));
         let has_sms = all_perms.iter().any(|p| p.contains("SMS"));
+        let has_query_all = all_perms.iter().any(|p| p.contains("QUERY_ALL_PACKAGES"));
+        let has_device_admin = all_perms.iter().any(|p| p.contains("BIND_DEVICE_ADMIN"));
 
-        if has_accessibility && (has_overlay || has_sms) {
+        if has_accessibility && (has_overlay || has_sms || has_query_all) {
             threats.push("Trojan.AndroidOS.Banker".into());
             risk_score = risk_score.max(90);
+        }
+        if has_device_admin && has_accessibility {
+            threats.push("Trojan.AndroidOS.Locker".into());
+            risk_score = risk_score.max(95);
         }
 
         let clamped_score = risk_score.min(100);

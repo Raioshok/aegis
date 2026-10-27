@@ -67,6 +67,32 @@ impl YaraEngine {
         })
     }
 
+    /// Hot-reload YARA rules from updated source strings without restarting.
+    pub fn reload_from_sources<I, S>(&mut self, sources: I) -> Result<usize, String>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut compiler = yara_x::Compiler::new();
+        let mut count = 0usize;
+        let mut hasher = Sha256::new();
+        for src in sources {
+            let s = src.as_ref();
+            compiler
+                .add_source(s)
+                .map_err(|e| format!("YARA compile error: {e}"))?;
+            hasher.update(s.as_bytes());
+            count += 1;
+        }
+        let rules = Arc::new(compiler.build());
+        let rule_count = rules.iter().count();
+        self.rules = rules;
+        self.rule_count = rule_count;
+        self.sources = count;
+        self.version = hex::encode(&hasher.finalize()[..8]);
+        Ok(rule_count)
+    }
+
     /// Compile every `*.yar`/`*.yara` file found under the given directories.
     /// Skips files that fail compilation individually so one bad file never breaks the engine.
     pub fn from_dirs(dirs: &[&Path]) -> Result<Self, String> {

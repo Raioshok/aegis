@@ -13,21 +13,56 @@ fn env_path(key: &str) -> Option<PathBuf> {
 }
 
 fn home() -> PathBuf {
-    env_path("HOME").unwrap_or_else(|| PathBuf::from("/root"))
+    #[cfg(windows)]
+    {
+        env_path("USERPROFILE")
+            .or_else(|| env_path("HOME"))
+            .unwrap_or_else(|| PathBuf::from(r"C:\Users\Default"))
+    }
+    #[cfg(not(windows))]
+    {
+        env_path("HOME").unwrap_or_else(|| PathBuf::from("/root"))
+    }
 }
 
-/// `$XDG_CONFIG_HOME/aegis` (default `~/.config/aegis`).
+/// `$XDG_CONFIG_HOME/aegis` on Linux or `%LOCALAPPDATA%\Aegis\config` on Windows.
 pub fn config_dir() -> PathBuf {
-    env_path("XDG_CONFIG_HOME")
-        .unwrap_or_else(|| home().join(".config"))
-        .join("aegis")
+    #[cfg(windows)]
+    {
+        if let Some(local) = env_path("LOCALAPPDATA") {
+            local.join("Aegis").join("config")
+        } else if let Some(pd) = env_path("ProgramData") {
+            pd.join("Aegis").join("config")
+        } else {
+            home().join(".config").join("aegis")
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        env_path("XDG_CONFIG_HOME")
+            .unwrap_or_else(|| home().join(".config"))
+            .join("aegis")
+    }
 }
 
-/// `$XDG_DATA_HOME/aegis` (default `~/.local/share/aegis`).
+/// `$XDG_DATA_HOME/aegis` on Linux or `%LOCALAPPDATA%\Aegis\data` on Windows.
 pub fn data_dir() -> PathBuf {
-    env_path("XDG_DATA_HOME")
-        .unwrap_or_else(|| home().join(".local/share"))
-        .join("aegis")
+    #[cfg(windows)]
+    {
+        if let Some(local) = env_path("LOCALAPPDATA") {
+            local.join("Aegis").join("data")
+        } else if let Some(pd) = env_path("ProgramData") {
+            pd.join("Aegis").join("data")
+        } else {
+            home().join(".local/share").join("aegis")
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        env_path("XDG_DATA_HOME")
+            .unwrap_or_else(|| home().join(".local/share"))
+            .join("aegis")
+    }
 }
 
 pub fn config_file() -> PathBuf {

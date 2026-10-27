@@ -54,6 +54,8 @@ impl Database {
         conn.execute_batch(
             r#"
             PRAGMA journal_mode = WAL;
+            PRAGMA synchronous = NORMAL;
+            PRAGMA wal_autocheckpoint = 1000;
             PRAGMA foreign_keys = ON;
 
             CREATE TABLE IF NOT EXISTS scans (
@@ -107,6 +109,13 @@ impl Database {
     /// Access the quarantine index repository.
     pub fn quarantine(&self) -> QuarantineIndex<'_> {
         QuarantineIndex::new(&self.conn)
+    }
+
+    /// Truncate and checkpoint the SQLite Write-Ahead Log (WAL) to prevent file bloat.
+    pub fn checkpoint(&self) -> Result<()> {
+        let conn = self.conn.lock().expect("db mutex poisoned");
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .map_err(|e| AegisError::Storage(e.to_string()))
     }
 }
 

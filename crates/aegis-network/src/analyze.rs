@@ -157,6 +157,11 @@ const LOLBINS: &[&str] = &[
     "hh.exe",
     "installutil.exe",
     "regasm.exe",
+    "msbuild.exe",
+    "cmstp.exe",
+    "wmic.exe",
+    "curl.exe",
+    "wget.exe",
 ];
 
 pub fn is_known_lolbin(name: &str) -> bool {

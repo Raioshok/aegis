@@ -76,6 +76,28 @@ impl DexScanner {
             score += 15;
         }
 
+        // 8. DEX Packer & High Entropy Code Section
+        let sample = &data[..data.len().min(64 * 1024)];
+        let mut freq = [0u64; 256];
+        for &b in sample {
+            freq[b as usize] += 1;
+        }
+        let len_f = sample.len() as f64;
+        let mut ent = 0.0f64;
+        if len_f > 0.0 {
+            for &c in &freq {
+                if c > 0 {
+                    let p = c as f64 / len_f;
+                    ent -= p * p.log2();
+                }
+            }
+        }
+        if ent > 7.35 {
+            indicators.push("Packer.AndroidOS.EncryptedDex".into());
+            suspicious.push(format!("DEX file has high Shannon entropy ({:.2} bits/byte), indicating packer encryption (Jiagu/Legu)", ent));
+            score += 35;
+        }
+
         DexAnalysis {
             is_valid_dex: is_valid,
             string_count: lower.matches('\0').count(),

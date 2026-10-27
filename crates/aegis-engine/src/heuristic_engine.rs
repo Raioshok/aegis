@@ -204,7 +204,38 @@ impl Engine for HeuristicEngine {
         let head = &data[..data.len().min(512)];
         let is_elf = head.starts_with(b"\x7fELF");
         let is_pe = head.starts_with(b"MZ");
-        let is_executable = is_elf || is_pe;
+        let is_macho = head.starts_with(&[0xfe, 0xed, 0xfa, 0xce])
+            || head.starts_with(&[0xfe, 0xed, 0xfa, 0xcf])
+            || head.starts_with(&[0xca, 0xfe, 0xba, 0xbe]);
+        let is_executable = is_elf || is_pe || is_macho;
+
+        // Polyglot inspection: non-PE container hiding a full PE binary
+        if !is_pe && data.len() > 1024 {
+            let is_image_or_doc = head.starts_with(b"GIF89a")
+                || head.starts_with(b"GIF87a")
+                || head.starts_with(b"\xff\xd8\xff")
+                || head.starts_with(b"\x89PNG\r\n\x1a\n")
+                || head.starts_with(b"%PDF-");
+            if is_image_or_doc {
+                if let Some(mz_idx) = find_bytes_index(&data[64..data.len().min(1024 * 1024)], b"MZ") {
+                    let actual_idx = 64 + mz_idx;
+                    if actual_idx + 0x40 <= data.len() {
+                        let pe_off = u32::from_le_bytes(data[actual_idx + 0x3c..actual_idx + 0x40].try_into().unwrap_or([0; 4])) as usize;
+                        if actual_idx + pe_off + 4 <= data.len() && &data[actual_idx + pe_off..actual_idx + pe_off + 4] == b"PE\0\0" {
+                            out.push(Detection::with_scores(
+                                "Heuristic",
+                                "Suspicious.Polyglot.HiddenPE",
+                                Severity::High,
+                                ThreatClass::Heuristic,
+                                format!("File disguised as image/document contains a hidden executable PE payload at offset 0x{:x}", actual_idx),
+                                0.9,
+                                0.9,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
 
         // 1. Packer markers — run ONLY on executables (never on text or data)
         if is_executable {
@@ -357,15 +388,16 @@ impl Engine for HeuristicEngine {
             }
         }
 
-        // Filename and extension masquerading checks
+        // Filename and extension masquerading checks (RTLO & directional control chars)
         if let Some(filename) = ctx.path.file_name().and_then(|n| n.to_str()) {
-            if filename.contains('\u{202E}') {
+            let directional_chars = ['\u{202A}', '\u{202B}', '\u{202C}', '\u{202D}', '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}'];
+            if let Some(c) = directional_chars.iter().find(|&&c| filename.contains(c)) {
                 out.push(Detection::with_scores(
                     "Heuristic",
                     "Suspicious.RTLO.Filename",
                     Severity::Critical,
                     ThreatClass::Heuristic,
-                    format!("Filename '{filename}' contains Right-to-Left Override Unicode character (U+202E) to disguise file extension"),
+                    format!("Filename '{filename}' contains directional Unicode override character (U+{:04X}) to disguise file extension", *c as u32),
                     0.95,
                     0.95,
                 ));
@@ -464,6 +496,13 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> bool {
         return false;
     }
     haystack.windows(needle.len()).any(|w| w == needle)
+}
+
+fn find_bytes_index(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 #[cfg(test)]

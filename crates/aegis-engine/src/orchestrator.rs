@@ -119,9 +119,10 @@ impl Scanner {
         out
     }
 
-    fn get_cache_key(&self, meta: &std::fs::Metadata) -> CacheKey {
+    fn get_cache_key(&self, path: &Path, meta: &std::fs::Metadata) -> CacheKey {
         #[cfg(unix)]
         {
+            let _ = path;
             use std::os::unix::fs::MetadataExt;
             CacheKey {
                 ino_or_id: meta.ino(),
@@ -131,15 +132,20 @@ impl Scanner {
         }
         #[cfg(windows)]
         {
+            use std::hash::{Hash, Hasher};
             use std::os::windows::fs::MetadataExt;
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            path.hash(&mut h);
+            let id = h.finish() ^ meta.creation_time();
             CacheKey {
-                ino_or_id: meta.file_size(),
+                ino_or_id: id,
                 size: meta.file_size(),
                 mtime_ns: meta.last_write_time() as i64,
             }
         }
         #[cfg(not(any(unix, windows)))]
         {
+            let _ = path;
             CacheKey {
                 ino_or_id: 0,
                 size: meta.len(),
@@ -179,7 +185,7 @@ impl Scanner {
         }
 
         // 2. Verdict Cache lookup.
-        let cache_key = self.get_cache_key(&meta);
+        let cache_key = self.get_cache_key(path, &meta);
         if let Ok(cache) = self.cache.read() {
             if let Some(cached) = cache.get(&cache_key) {
                 return cached.clone();

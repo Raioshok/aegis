@@ -171,14 +171,48 @@ pub fn dns_latency_ms(host: &str) -> Option<u128> {
     }
 }
 
+#[cfg(windows)]
+fn scan_windows_network(r: &mut OptimizeReport) {
+    if let Ok(out) = Command::new("netsh").args(&["int", "tcp", "show", "global"]).output() {
+        if out.status.success() {
+            let text = String::from_utf8_lossy(&out.stdout).to_ascii_lowercase();
+            if text.contains("autotuninglevel") && (text.contains("disabled") || text.contains("highlyrestricted")) {
+                r.push(Finding::action(
+                    "Network Tuning",
+                    "TCP Window Auto-Tuning is Restrained",
+                    "TCP Window Auto-Tuning is disabled or restricted, limiting high-speed throughput.",
+                    Impact::High,
+                    0,
+                    "netsh int tcp set global autotuninglevel=normal",
+                    true,
+                ));
+            } else {
+                r.push(Finding::ok(
+                    "Network Tuning",
+                    "TCP Window Auto-Tuning is Optimal",
+                    "Receive Window Auto-Tuning is active at normal throughput profile.",
+                ));
+            }
+        }
+    }
+}
+
 /// Full network optimization scan.
 pub fn scan() -> OptimizeReport {
     let mut r = OptimizeReport::default();
 
-    // sysctl tuning.
-    let current = read_current_sysctl();
-    for f in analyze_sysctl(&current) {
-        r.push(f);
+    #[cfg(target_os = "linux")]
+    {
+        // sysctl tuning.
+        let current = read_current_sysctl();
+        for f in analyze_sysctl(&current) {
+            r.push(f);
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        scan_windows_network(&mut r);
     }
 
     // DNS latency.

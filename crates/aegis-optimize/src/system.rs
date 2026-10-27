@@ -75,6 +75,7 @@ pub fn parse_size(s: &str) -> Option<u64> {
         .map(|v| (v * mult as f64) as u64)
 }
 
+#[allow(dead_code)]
 fn cmd_stdout(prog: &str, args: &[&str]) -> Option<String> {
     let out = Command::new(prog).args(args).output().ok()?;
     if out.status.success() || !out.stdout.is_empty() {
@@ -87,15 +88,85 @@ fn cmd_stdout(prog: &str, args: &[&str]) -> Option<String> {
 /// Run the full system optimization scan.
 pub fn scan() -> OptimizeReport {
     let mut r = OptimizeReport::default();
-    scan_pacman_cache(&mut r);
-    scan_orphans(&mut r);
-    scan_journal(&mut r);
-    scan_user_cache(&mut r);
-    scan_tmp(&mut r);
-    scan_failed_units(&mut r);
+    #[cfg(target_os = "linux")]
+    {
+        scan_pacman_cache(&mut r);
+        scan_orphans(&mut r);
+        scan_journal(&mut r);
+        scan_user_cache(&mut r);
+        scan_tmp(&mut r);
+        scan_failed_units(&mut r);
+    }
+    #[cfg(windows)]
+    {
+        scan_windows_junk(&mut r);
+    }
     r
 }
 
+#[cfg(windows)]
+fn scan_windows_junk(r: &mut OptimizeReport) {
+    use std::path::PathBuf;
+    let local_appdata = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    let win_dir = std::env::var_os("WINDIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+
+    // 1. User Temp Directory
+    if let Some(ref local) = local_appdata {
+        let temp_dir = local.join("Temp");
+        let size = dir_size(&temp_dir);
+        if size > 50 * 1024 * 1024 {
+            r.push(Finding::action(
+                "Disk Cleanup",
+                "User Temporary Files",
+                format!("%LOCALAPPDATA%\\Temp holds {} of cached logs and setup scratch files.", human_bytes(size)),
+                if size > 2 * 1024u64.pow(3) { Impact::High } else { Impact::Medium },
+                size * 4 / 5,
+                "del /q /f /s %TEMP%\\*",
+                false,
+            ));
+        } else {
+            r.push(Finding::ok("Disk Cleanup", "User Temp folder is lean", format!("{} in use.", human_bytes(size))));
+        }
+    }
+
+    // 2. Windows Update Download Cache
+    let soft_dist = win_dir.join("SoftwareDistribution").join("Download");
+    if soft_dist.is_dir() {
+        let size = dir_size(&soft_dist);
+        if size > 100 * 1024 * 1024 {
+            r.push(Finding::action(
+                "System Storage",
+                "Windows Update Download Cache",
+                format!("Downloaded Windows Update packages take up {}.", human_bytes(size)),
+                Impact::Medium,
+                size,
+                "net stop wuauserv && rmdir /s /q C:\\Windows\\SoftwareDistribution\\Download",
+                true,
+            ));
+        } else {
+            r.push(Finding::ok("System Storage", "Windows Update cache is clean", format!("{} in use.", human_bytes(size))));
+        }
+    }
+
+    // 3. Crash Dumps
+    if let Some(ref local) = local_appdata {
+        let crash_dumps = local.join("CrashDumps");
+        let size = dir_size(&crash_dumps);
+        if size > 20 * 1024 * 1024 {
+            r.push(Finding::action(
+                "Diagnostic Logs",
+                "Application Crash Dumps",
+                format!("Application crash dumps take up {}.", human_bytes(size)),
+                Impact::Low,
+                size,
+                "del /q /f %LOCALAPPDATA%\\CrashDumps\\*.dmp",
+                false,
+            ));
+        }
+    }
+}
+
+#[allow(dead_code)]
 fn scan_pacman_cache(r: &mut OptimizeReport) {
     let dir = Path::new("/var/cache/pacman/pkg");
     if !dir.is_dir() {
@@ -142,6 +213,7 @@ fn scan_pacman_cache(r: &mut OptimizeReport) {
     }
 }
 
+#[allow(dead_code)]
 fn scan_orphans(r: &mut OptimizeReport) {
     let Some(out) = cmd_stdout("pacman", &["-Qtdq"]) else {
         return;
@@ -177,6 +249,7 @@ fn scan_orphans(r: &mut OptimizeReport) {
     }
 }
 
+#[allow(dead_code)]
 fn scan_journal(r: &mut OptimizeReport) {
     let Some(out) = cmd_stdout("journalctl", &["--disk-usage"]) else {
         return;
@@ -208,6 +281,7 @@ fn scan_journal(r: &mut OptimizeReport) {
     }
 }
 
+#[allow(dead_code)]
 fn scan_user_cache(r: &mut OptimizeReport) {
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     let Some(cache) = home.map(|h| h.join(".cache")) else {
@@ -241,6 +315,7 @@ fn scan_user_cache(r: &mut OptimizeReport) {
     }
 }
 
+#[allow(dead_code)]
 fn scan_tmp(r: &mut OptimizeReport) {
     let size = dir_size(Path::new("/tmp"));
     if size > 512 * 1024 * 1024 {
@@ -259,6 +334,7 @@ fn scan_tmp(r: &mut OptimizeReport) {
     }
 }
 
+#[allow(dead_code)]
 fn scan_failed_units(r: &mut OptimizeReport) {
     let Some(out) = cmd_stdout("systemctl", &["--failed", "--no-legend", "--plain"]) else {
         return;
